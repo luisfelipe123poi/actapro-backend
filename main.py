@@ -55,9 +55,8 @@ mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 aai.settings.api_key = AAI_API_KEY
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Prompt enfocado en máxima exhaustividad y cero resumen innecesario
-    prompt_sistema = """
-Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
+# Prompt unificado y estricto de instrucciones jurídicas de alto nivel
+PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
 Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
 
 ORDEN DE TRABAJO (ESTRICTO):
