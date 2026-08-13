@@ -17,7 +17,7 @@ import mercadopago
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +41,13 @@ mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["actabot_db"]
 users_collection = db["users"]
 actas_collection = db["actas_historial"]
-transripciones_collection = db["transripciones_cache"] # Colección para respaldar copias de transcripciones
+transripciones_collection = db["transripciones_cache"]
+
+# Configurar índice TTL para eliminar automáticamente la caché de transcripciones pasados 30 días (2592000 segundos)
+try:
+    transripciones_collection.create_index("createdAt", expireAfterSeconds=2592000)
+except Exception as e:
+    print(f"Nota sobre índice TTL: {e}")
 
 # Inicializar SDK de Mercado Pago
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
@@ -298,12 +304,13 @@ async def procesar_asamblea(
             else:
                 texto_transcrito = transcript.text
 
-            # Guardar la copia de la transcripción en base de datos para futuras peticiones con el mismo audio
+            # Guardar la copia de la transcripción en base de datos con TTL de 30 días
             transripciones_collection.insert_one({
                 "file_hash": file_hash,
                 "filename": file.filename,
                 "texto_transcrito": texto_transcrito,
-                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "createdAt": datetime.datetime.utcnow()
             })
 
         # Construcción del prompt unificado de sistema
