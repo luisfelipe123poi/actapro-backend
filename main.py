@@ -39,7 +39,7 @@ mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["actabot_db"]
 users_collection = db["users"]
 
-# Inicializar SDK de Mercado Pago de forma robusta
+# Inicializar SDK de Mercado Pago
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
 aai.settings.api_key = AAI_API_KEY
@@ -72,7 +72,7 @@ class AuthModel(BaseModel):
 class PaymentPreferenceModel(BaseModel):
     email: str
     plan_name: str
-    price: Optional[float] = None
+    price: Optional[float] = None  # Opcional por compatibilidad, pero el backend ignorará el valor recibido
 
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
@@ -121,8 +121,9 @@ def get_user_status(email: str):
 @app.post("/api/crear-preferencia-pago")
 def crear_preferencia_pago(data: PaymentPreferenceModel):
     if not mp_sdk:
-        raise HTTPException(status_code=500, detail="Mercado Pago no está configurado en el servidor (Falta MP_ACCESS_TOKEN).")
+        raise HTTPException(status_code=500, detail="Mercado Pago no está configurado en el servidor.")
         
+    # Normalización robusta para aceptar nombres con tildes, mayúsculas o espacios desde el frontend
     plan_recibido = data.plan_name.lower().strip()
     
     mapeo = {
@@ -143,6 +144,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     
     info_plan = PRECIOS_PLANES[plan_id]
 
+    # Verificar si el usuario existe en MongoDB; si no existe, crearlo como invitado provisional
     user = users_collection.find_one({"email": data.email})
     if not user:
         users_collection.insert_one({
@@ -158,7 +160,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
                 "title": f"ActaBot PH - {info_plan['nombre']}",
                 "quantity": 1,
                 "currency_id": "COP",
-                "unit_price": info_plan["precio"]
+                "unit_price": info_plan["precio"]  # Precio blindado y controlado desde el backend
             }
         ],
         "payer": {
@@ -170,34 +172,34 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
             "pending": "https://actapro-backend.onrender.com/pago-pendiente"
         },
         "auto_return": "approved",
-        "notification_url": "https://actapro-backend.onrender.com/api/webhook-mercadopago" 
+        "notification_url": "https://actapro-backend.onrender.com/api/webhook-mercadopago",
+        "statement_descriptor": "ACTABOT PH", # Nombre que verá el usuario en su tarjeta/banco
+        "external_reference": str(data.user_id) # O un ID único de la transacción para conciliar en el webhook
     }
 
     try:
         preference_response = mp_sdk.preference().create(preference_data)
         print("RESPUESTA CRUDA DE MERCADO PAGO:", preference_response)
         
-        # Validación estricta para evitar devolver null al frontend
-        if not preference_response or "response" not in preference_response:
-            print("❌ Error: Respuesta vacía de la API de Mercado Pago.")
-            raise HTTPException(status_code=502, detail="Mercado Pago no respondió correctamente.")
-            
-        preference = preference_response["response"]
+        # Nota: Dependiendo de la versión del SDK oficial de python de mercadopago, 
+        # a veces la respuesta viene directamente en el diccionario raíz o bajo "response".
+        # Si usas la versión moderna del SDK, 'preference_response' suele ser un objeto 
+        # cuyo diccionario principal está en .get("response") o directamente en la raíz.
+        preference = preference_response.get("response", preference_response)
         init_point = preference.get("init_point")
         sandbox_init_point = preference.get("sandbox_init_point")
         
         if not init_point:
-            print("❌ Error crítico: init_point es nulo. Revisa tus credenciales MP_ACCESS_TOKEN o restricciones de la cuenta:", preference_response)
-            raise HTTPException(status_code=400, detail="Mercado Pago rechazó la preferencia o el token de acceso es inválido.")
+            print("¡ALERTA! Mercado Pago devolvió null:", preference_response)
+            raise HTTPException(status_code=400, detail="Mercado Pago rechazó la preferencia o devolvió credenciales inválidas.")
         
         return {
             "init_point": init_point,
             "sandbox_init_point": sandbox_init_point
         }
     except Exception as e:
-        print("Excepción capturada en crear-preferencia-pago:", str(e))
+        print("Error crítico en preferencia:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/api/webhook-mercadopago")
 async def webhook_mercadopago(request: Request):
     try:
