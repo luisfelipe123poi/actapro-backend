@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+pymongo
+mercadopago
+assemblyai
+openai
+python-docx
+python-multipart
