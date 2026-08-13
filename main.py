@@ -15,7 +15,7 @@ import mercadopago
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.6")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.7")
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,7 +72,7 @@ class AuthModel(BaseModel):
 class PaymentPreferenceModel(BaseModel):
     email: str
     plan_name: str
-    price: Optional[float] = None  # Opcional por compatibilidad, pero el backend ignorará el valor recibido
+    price: Optional[float] = None  # Opcional por compatibilidad
 
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
@@ -173,18 +173,14 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
         },
         "auto_return": "approved",
         "notification_url": "https://actapro-backend.onrender.com/api/webhook-mercadopago",
-        "statement_descriptor": "ACTABOT PH", # Nombre que verá el usuario en su tarjeta/banco
-        "external_reference": str(data.user_id) # O un ID único de la transacción para conciliar en el webhook
+        "statement_descriptor": "ACTABOT PH",
+        "external_reference": data.email  # Se usa el email como identificador único de referencia
     }
 
     try:
         preference_response = mp_sdk.preference().create(preference_data)
         print("RESPUESTA CRUDA DE MERCADO PAGO:", preference_response)
         
-        # Nota: Dependiendo de la versión del SDK oficial de python de mercadopago, 
-        # a veces la respuesta viene directamente en el diccionario raíz o bajo "response".
-        # Si usas la versión moderna del SDK, 'preference_response' suele ser un objeto 
-        # cuyo diccionario principal está en .get("response") o directamente en la raíz.
         preference = preference_response.get("response", preference_response)
         init_point = preference.get("init_point")
         sandbox_init_point = preference.get("sandbox_init_point")
@@ -200,6 +196,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     except Exception as e:
         print("Error crítico en preferencia:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/webhook-mercadopago")
 async def webhook_mercadopago(request: Request):
     try:
@@ -211,7 +208,7 @@ async def webhook_mercadopago(request: Request):
                 payment = payment_info.get("response", {})
                 
                 if payment.get("status") == "approved":
-                    payer_email = payment.get("payer", {}).get("email")
+                    payer_email = payment.get("payer", {}).get("email") or payment.get("external_reference")
                     if payer_email:
                         items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
                         plan_asignado = "profesional"
