@@ -1,6 +1,7 @@
 import os
 import uuid
 import shutil
+import datetime
 from typing import Optional
 import assemblyai as aai
 from openai import OpenAI
@@ -15,7 +16,7 @@ import mercadopago
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.7")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.8")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +39,7 @@ if not AAI_API_KEY or not OPENAI_API_KEY:
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["actabot_db"]
 users_collection = db["users"]
+actas_collection = db["actas_historial"]
 
 # Inicializar SDK de Mercado Pago
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
@@ -117,6 +119,11 @@ def get_user_status(email: str):
         "plan": usuario.get("plan", "free"),
         "tokens": usuario.get("tokens", 0)
     }    
+
+@app.get("/api/actas/historial")
+def obtener_historial_actas(email: str):
+    actas = list(actas_collection.find({"email": email}, {"_id": 0}))
+    return {"actas": actas}
 
 @app.post("/api/crear-preferencia-pago")
 def crear_preferencia_pago(data: PaymentPreferenceModel):
@@ -292,6 +299,19 @@ async def procesar_asamblea(
                 doc.add_paragraph(linea.strip())
         doc.save(output_docx_path)
 
+        # Guardar en MongoDB para el historial del dashboard
+        nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
+        peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
+        
+        data_acta = {
+            "email": email,
+            "nombre_acta": nombre_archivo_acta,
+            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "peso": peso_archivo,
+            "contenido": acta_final
+        }
+        actas_collection.insert_one(data_acta)
+
         if user["plan"] == "free":
             nuevos_tokens = user["tokens"] - 1
             users_collection.update_one(
@@ -301,7 +321,7 @@ async def procesar_asamblea(
 
         return FileResponse(
             path=output_docx_path,
-            filename=f"Acta_Asamblea_{session_id[:8]}.docx",
+            filename=nombre_archivo_acta,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
