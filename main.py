@@ -15,7 +15,7 @@ import mercadopago
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.5")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.6")
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +45,7 @@ mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 aai.settings.api_key = AAI_API_KEY
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Diccionario seguro de precios y planes en el backend para evitar fraudes desde el navegador
+# Diccionario seguro de precios y planes controlados estrictamente en el backend
 PRECIOS_PLANES = {
     "basico": {
         "nombre": "Plan Básico",
@@ -71,7 +71,8 @@ class AuthModel(BaseModel):
 
 class PaymentPreferenceModel(BaseModel):
     email: str
-    plan_name: str  # Recibe la clave segura: 'basico', 'profesional', 'corporativo'
+    plan_name: str
+    price: Optional[float] = None  # Opcional por compatibilidad, pero el backend ignorará el valor recibido
 
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
@@ -122,10 +123,24 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     if not mp_sdk:
         raise HTTPException(status_code=500, detail="Mercado Pago no está configurado en el servidor.")
         
-    # Validar que el plan exista en el diccionario seguro del backend
-    plan_id = data.plan_name.lower()
-    if plan_id not in PRECIOS_PLANES:
-        raise HTTPException(status_code=400, detail="Plan no válido.")
+    # Normalización robusta para aceptar nombres con tildes, mayúsculas o espacios desde el frontend
+    plan_recibido = data.plan_name.lower().strip()
+    
+    mapeo = {
+        "basico": "basico",
+        "básico": "basico",
+        "plan basico": "basico",
+        "plan básico": "basico",
+        "profesional": "profesional",
+        "plan profesional": "profesional",
+        "corporativo": "corporativo",
+        "plan corporativo": "corporativo"
+    }
+    
+    plan_id = mapeo.get(plan_recibido)
+    
+    if not plan_id or plan_id not in PRECIOS_PLANES:
+        raise HTTPException(status_code=400, detail=f"Plan no válido: '{data.plan_name}'")
     
     info_plan = PRECIOS_PLANES[plan_id]
 
@@ -145,7 +160,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
                 "title": f"ActaBot PH - {info_plan['nombre']}",
                 "quantity": 1,
                 "currency_id": "COP",
-                "unit_price": info_plan["precio"]  # Precio seguro definido estrictamente en el backend
+                "unit_price": info_plan["precio"]  # Precio blindado y controlado desde el backend
             }
         ],
         "payer": {
@@ -184,7 +199,6 @@ async def webhook_mercadopago(request: Request):
                 if payment.get("status") == "approved":
                     payer_email = payment.get("payer", {}).get("email")
                     if payer_email:
-                        # Identificar qué plan se pagó a través del título o el monto para actualizar acorde
                         items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
                         plan_asignado = "profesional"
                         tokens_otorgados = 200
