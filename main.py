@@ -2,6 +2,7 @@ import os
 import uuid
 import shutil
 import datetime
+import hashlib
 from typing import Optional
 import assemblyai as aai
 from openai import OpenAI
@@ -16,7 +17,7 @@ import mercadopago
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.8")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9")
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,12 +41,28 @@ mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["actabot_db"]
 users_collection = db["users"]
 actas_collection = db["actas_historial"]
+transripciones_collection = db["transripciones_cache"] # Colección para respaldar copias de transcripciones
 
 # Inicializar SDK de Mercado Pago
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
 aai.settings.api_key = AAI_API_KEY
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Prompt enfocado en máxima exhaustividad y cero resumen innecesario
+    prompt_sistema = """
+Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
+Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
+
+ORDEN DE TRABAJO (ESTRICTO):
+1. INTEGRIDAD DE LA INFORMACIÓN: NO RESUMAS EL CONTENIDO TÉCNICO NI LAS PROPUESTAS. Debes capturar todos los argumentos, cifras, justificaciones financieras, propuestas de mantenimiento y posturas de los copropietarios. Si alguien propone algo específico, inclúyelo detalladamente.
+2. FILTRADO DE RUIDO: ÚNICAMENTE elimina interrupciones, saludos, chismes, peleas personales o frases vacías que no aporten al objeto de la asamblea. Todo lo que tenga que ver con gestión, presupuesto, administración o decisiones debe quedar plasmado.
+3. ESTRUCTURA JURÍDICA:
+   - ENCABEZADO Y QUÓRUM: Detalla la verificación de coeficientes si se menciona.
+   - DESARROLLO PUNTO POR PUNTO: Para CADA punto del orden del día, redacta el desarrollo de forma narrativa pero minuciosa. Transcribe los debates relevantes ("El copropietario A solicitó aclarar X; el administrador respondió que Y").
+   - DECISIONES Y VOTACIONES: Registra el sentido de las votaciones y cualquier salvedad o constancia que los copropietarios hayan solicitado dejar por escrito.
+4. ESTILO Y FORMATO: Lenguaje jurídico formal, impersonal y preciso. Utiliza asteriscos dobles (ej: **$1.500.000** o **Aprobado por mayoría**) para resaltar en el texto cifras, costos, valores y decisiones clave. Redacta como si hubieras estado presente tomando nota exhaustiva de todo lo importante.
+"""
 
 # Diccionario seguro de precios y planes controlados estrictamente en el backend
 PRECIOS_PLANES = {
@@ -74,7 +91,7 @@ class AuthModel(BaseModel):
 class PaymentPreferenceModel(BaseModel):
     email: str
     plan_name: str
-    price: Optional[float] = None  # Opcional por compatibilidad
+    price: Optional[float] = None
 
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
@@ -110,7 +127,6 @@ def login_usuario(data: AuthModel):
 @app.get("/api/user/status")
 def get_user_status(email: str):
     usuario = users_collection.find_one({"email": email})
-    
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado en la base de datos")
     
@@ -130,7 +146,6 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     if not mp_sdk:
         raise HTTPException(status_code=500, detail="Mercado Pago no está configurado en el servidor.")
         
-    # Normalización robusta para aceptar nombres con tildes, mayúsculas o espacios desde el frontend
     plan_recibido = data.plan_name.lower().strip()
     
     mapeo = {
@@ -145,13 +160,11 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     }
     
     plan_id = mapeo.get(plan_recibido)
-    
     if not plan_id or plan_id not in PRECIOS_PLANES:
         raise HTTPException(status_code=400, detail=f"Plan no válido: '{data.plan_name}'")
     
     info_plan = PRECIOS_PLANES[plan_id]
 
-    # Verificar si el usuario existe en MongoDB; si no existe, crearlo como invitado provisional
     user = users_collection.find_one({"email": data.email})
     if not user:
         users_collection.insert_one({
@@ -167,7 +180,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
                 "title": f"ActaBot PH - {info_plan['nombre']}",
                 "quantity": 1,
                 "currency_id": "COP",
-                "unit_price": info_plan["precio"]  # Precio blindado y controlado desde el backend
+                "unit_price": info_plan["precio"]
             }
         ],
         "payer": {
@@ -181,19 +194,16 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
         "auto_return": "approved",
         "notification_url": "https://actapro-backend.onrender.com/api/webhook-mercadopago",
         "statement_descriptor": "ACTABOT PH",
-        "external_reference": data.email  # Se usa el email como identificador único de referencia
+        "external_reference": data.email
     }
 
     try:
         preference_response = mp_sdk.preference().create(preference_data)
-        print("RESPUESTA CRUDA DE MERCADO PAGO:", preference_response)
-        
         preference = preference_response.get("response", preference_response)
         init_point = preference.get("init_point")
         sandbox_init_point = preference.get("sandbox_init_point")
         
         if not init_point:
-            print("¡ALERTA! Mercado Pago devolvió null:", preference_response)
             raise HTTPException(status_code=400, detail="Mercado Pago rechazó la preferencia o devolvió credenciales inválidas.")
         
         return {
@@ -201,7 +211,6 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
             "sandbox_init_point": sandbox_init_point
         }
     except Exception as e:
-        print("Error crítico en preferencia:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/webhook-mercadopago")
@@ -260,46 +269,88 @@ async def procesar_asamblea(
     output_docx_path = f"temp_outputs/Acta_{session_id}.docx"
 
     try:
-        with open(temp_audio_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
-        transcriber = aai.Transcriber()
-        transcript = transcriber.transcribe(temp_audio_path, config=config)
-
-        if transcript.status == aai.TranscriptStatus.error:
-            raise HTTPException(status_code=500, detail=f"Error en AssemblyAI: {transcript.error}")
-
-        texto_transcrito = ""
-        if transcript.utterances:
-            for utterance in transcript.utterances:
-                texto_transcrito += f"[Persona {utterance.speaker}]: {utterance.text}\n"
+        content_bytes = await file.read()
+        
+        # Calcular hash SHA-256 del archivo de audio para reutilizar transcripciones y ahorrar costos en AssemblyAI
+        file_hash = hashlib.sha256(content_bytes).hexdigest()
+        
+        # Verificar si ya existe una copia de la transcripción guardada en MongoDB para este mismo audio
+        cached_transcription = transripciones_collection.find_one({"file_hash": file_hash})
+        
+        if cached_transcription:
+            print("💡 Audio duplicado detectado: Reutilizando transcripción guardada para evitar gasto en AssemblyAI.")
+            texto_transcrito = cached_transcription["texto_transcrito"]
         else:
-            texto_transcrito = transcript.text
+            with open(temp_audio_path, "wb") as buffer:
+                buffer.write(content_bytes)
 
-        prompt_sistema = "Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Redacta un ACTA DE ASAMBLEA FORMAL."
+            config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
+            transcriber = aai.Transcriber()
+            transcript = transcriber.transcribe(temp_audio_path, config=config)
+
+            if transcript.status == aai.TranscriptStatus.error:
+                raise HTTPException(status_code=500, detail=f"Error en AssemblyAI: {transcript.error}")
+
+            texto_transcrito = ""
+            if transcript.utterances:
+                for utterance in transcript.utterances:
+                    texto_transcrito += f"[Persona {utterance.speaker}]: {utterance.text}\n"
+            else:
+                texto_transcrito = transcript.text
+
+            # Guardar la copia de la transcripción en base de datos para futuras peticiones con el mismo audio
+            transripciones_collection.insert_one({
+                "file_hash": file_hash,
+                "filename": file.filename,
+                "texto_transcrito": texto_transcrito,
+                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+
+        # Construcción del prompt unificado de sistema
+        prompt_sistema = PROMPT_SISTEMA_ACTAS
         if instrucciones:
-            prompt_sistema += f"\n\nREGLAS:\n{instrucciones}"
+            prompt_sistema += f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
 
+        # Procesamiento inteligente con OpenAI usando GPT-4o-mini
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": prompt_sistema},
-                {"role": "user", "content": f"Transcripción:\n\n{texto_transcrito}"}
+                {"role": "user", "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}"}
             ],
             temperature=0.3
         )
 
         acta_final = response.choices[0].message.content
 
+        # Generación avanzada del documento Word con soporte de títulos y formato de negritas automáticas
         doc = Document()
-        doc.add_heading('ACTA DE ASAMBLEA DE COPROPIETARIOS', 0)
+        titulo_principal = doc.add_heading('ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS', level=0)
+        titulo_principal.alignment = 1
+        
         for linea in acta_final.split('\n'):
-            if linea.strip():
-                doc.add_paragraph(linea.strip())
+            linea_clean = linea.strip()
+            if not linea_clean:
+                continue
+                
+            if linea_clean.startswith('# '):
+                doc.add_heading(linea_clean.replace('# ', '').strip(), level=1)
+            elif linea_clean.startswith('## ') or linea_clean.startswith('### '):
+                doc.add_heading(linea_clean.replace('#', '').strip(), level=2)
+            else:
+                p = doc.add_paragraph()
+                if '**' in linea_clean:
+                    partes = linea_clean.split('**')
+                    for i, parte in enumerate(partes):
+                        if parte:
+                            run = p.add_run(parte)
+                            if i % 2 == 1:
+                                run.bold = True
+                else:
+                    p.add_run(linea_clean)
+                
         doc.save(output_docx_path)
 
-        # Guardar en MongoDB para el historial del dashboard
         nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
         peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
         
