@@ -167,23 +167,32 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
             "email": data.email
         },
         "back_urls": {
-            "success": "http://127.0.0.1:8000/pago-exitoso",
-            "failure": "http://127.0.0.1:8000/pago-fallido",
-            "pending": "http://127.0.0.1:8000/pago-pendiente"
+            "success": "https://actapro-backend.onrender.com/pago-exitoso",
+            "failure": "https://actapro-backend.onrender.com/pago-fallido",
+            "pending": "https://actapro-backend.onrender.com/pago-pendiente"
         },
         "auto_return": "approved",
-        "notification_url": "https://tu-dominio.com/api/webhook-mercadopago" 
+        "notification_url": "https://actapro-backend.onrender.com/api/webhook-mercadopago" 
     }
 
     try:
         preference_response = mp_sdk.preference().create(preference_data)
-        preference = preference_response["response"]
+        print("RESPUESTA CRUDA DE MERCADO PAGO:", preference_response)
+        
+        preference = preference_response.get("response", {})
+        init_point = preference.get("init_point")
+        sandbox_init_point = preference.get("sandbox_init_point")
+        
+        if not init_point:
+            print("¡ALERTA! Mercado Pago devolvió null:", preference_response)
+            raise HTTPException(status_code=400, detail="Mercado Pago rechazó la preferencia o devolvió credenciales inválidas.")
         
         return {
-            "init_point": preference.get("init_point"),
-            "sandbox_init_point": preference.get("sandbox_init_point")
+            "init_point": init_point,
+            "sandbox_init_point": sandbox_init_point
         }
     except Exception as e:
+        print("Error crítico en preferencia:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/webhook-mercadopago")
