@@ -20,7 +20,7 @@ import io
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.4")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -453,7 +453,6 @@ async def procesar_asamblea(
 
   try:
     content_bytes = await file.read()
-
     file_hash = hashlib.sha256(content_bytes).hexdigest()
 
     cached_transcription = transripciones_collection.find_one(
