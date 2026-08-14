@@ -1,4 +1,3 @@
-from bson import ObjectId
 import datetime
 import hashlib
 import os
@@ -17,8 +16,12 @@ from pydantic import BaseModel
 from pymongo import MongoClient
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
 import io
 from bson import ObjectId
+import re
 
 load_dotenv()
 
