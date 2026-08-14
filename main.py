@@ -367,6 +367,75 @@ async def webhook_mercadopago(request: Request):
 
   return {"status": "ok"}
 
+from fastapi.responses import Response
+# Si prefieres generar el PDF al vuelo desde el contenido guardado en la base de datos:
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import io
+
+@app.get("/api/actas/descargar-pdf/{acta_id}")
+async def descargar_acta_pdf(acta_id: str, email: str):
+    # Buscar el acta en la base de datos por su nombre o ID
+    acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
+    if not acta:
+        from bson import ObjectId
+        try:
+            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+        except Exception:
+            pass
+            
+    if not acta:
+        raise HTTPException(status_code=404, detail="Acta no encontrada.")
+        
+    contenido_texto = acta.get("contenido", "")
+    nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", ".pdf")
+    
+    # Generar PDF en memoria usando ReportLab
+    pdf_buffer = io.BytesIO()
+    p = canvas.Canvas(pdf_buffer, pagesize=letter)
+    width, height = letter
+    
+    # Configuración básica de impresión de texto en PDF
+    margin = 50
+    y_position = height - margin
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(margin, y_position, "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS")
+    y_position -= 30
+    
+    p.setFont("Helvetica", 10)
+    lineas = contenido_texto.split('\n')
+    
+    for linea in lineas:
+        if y_position < margin:
+            p.showPage()
+            p.setFont("Helvetica", 10)
+            y_position = height - margin
+            
+        # Limpiar etiquetas de formato markdown simples para el PDF
+        linea_limpia = linea.replace("**", "").replace("#", "").strip()
+        if linea_limpia:
+            # Dividir líneas largas para que no se salgan de la página
+            if len(linea_limpia) > 95:
+                chunks = [linea_limpia[i:i+95] for i in range(0, len(linea_limpia), 95)]
+                for chunk in chunks:
+                    p.drawString(margin, y_position, chunk)
+                    y_position -= 15
+            else:
+                p.drawString(margin, y_position, linea_limpia)
+                y_position -= 15
+        else:
+            y_position -= 10 # Espacio entre párrafos
+
+    p.save()
+    pdf_buffer.seek(0)
+    
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+    )
+
+
 
 @app.post("/procesar")
 async def procesar_asamblea(
