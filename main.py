@@ -17,7 +17,7 @@ import mercadopago
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.1")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,8 +55,9 @@ mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 aai.settings.api_key = AAI_API_KEY
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Prompt unificado y estricto de instrucciones jurídicas de alto nivel
-PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
+# Prompt enfocado en máxima exhaustividad y cero resumen innecesario
+PROMPT_SISTEMA_ACTAS = """
+Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
 Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
 
 ORDEN DE TRABAJO (ESTRICTO):
@@ -66,7 +67,8 @@ ORDEN DE TRABAJO (ESTRICTO):
    - ENCABEZADO Y QUÓRUM: Detalla la verificación de coeficientes si se menciona.
    - DESARROLLO PUNTO POR PUNTO: Para CADA punto del orden del día, redacta el desarrollo de forma narrativa pero minuciosa. Transcribe los debates relevantes ("El copropietario A solicitó aclarar X; el administrador respondió que Y").
    - DECISIONES Y VOTACIONES: Registra el sentido de las votaciones y cualquier salvedad o constancia que los copropietarios hayan solicitado dejar por escrito.
-4. ESTILO Y FORMATO: Lenguaje jurídico formal, impersonal y preciso. Utiliza asteriscos dobles (ej: **$1.500.000** o **Aprobado por mayoría**) para resaltar en el texto cifras, costos, valores y decisiones clave. Redacta como si hubieras estado presente tomando nota exhaustiva de todo lo importante."""
+4. ESTILO Y FORMATO: Lenguaje jurídico formal, impersonal y preciso. Utiliza asteriscos dobles (ej: **$1.500.000** o **Aprobado por mayoría**) para resaltar en el texto cifras, costos, valores y decisiones clave. Redacta como si hubieras estado presente tomando nota exhaustiva de todo lo importante.
+"""
 
 # Diccionario seguro de precios y planes controlados estrictamente en el backend
 PRECIOS_PLANES = {
@@ -256,7 +258,8 @@ async def webhook_mercadopago(request: Request):
 async def procesar_asamblea(
     file: UploadFile = File(...),
     instrucciones: Optional[str] = Form(""),
-    email: str = Form(...)
+    email: str = Form(...),
+    nombre_personalizado: Optional[str] = Form(None)
 ):
     user = users_collection.find_one({"email": email})
     if not user:
@@ -270,7 +273,6 @@ async def procesar_asamblea(
 
     session_id = str(uuid.uuid4())
     temp_audio_path = f"temp_uploads/{session_id}_{file.filename}"
-    output_docx_path = f"temp_outputs/Acta_{session_id}.docx"
 
     try:
         content_bytes = await file.read()
@@ -310,6 +312,36 @@ async def procesar_asamblea(
                 "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "createdAt": datetime.datetime.utcnow()
             })
+
+        # Determinación o Autogeneración Inteligente del Nombre del Documento
+        if not nombre_personalizado or nombre_personalizado.strip() == "":
+            try:
+                # Pedir a OpenAI que extraiga el nombre del edificio/empresa de la transcripción
+                prompt_nombre = f"""
+                Analiza el siguiente fragmento de transcripción de una asamblea y extrae estrictamente el nombre del edificio, conjunto residencial, copropiedad o empresa mencionada. 
+                Responde ÚNICAMENTE con un nombre limpio apto para archivo (sin espacios, usa guiones bajos _, sin tildes ni caracteres especiales, por ejemplo: Acta_Asamblea_Edificio_Torre_Central).
+                
+                Transcripción:
+                {texto_transcrito[:2500]}...
+                """
+                resp_nombre = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt_nombre}],
+                    temperature=0.2
+                )
+                nombre_ia = resp_nombre.choices[0].message.content.strip().replace(" ", "_")
+                # Limpiar caracteres raros si los hubiera
+                nombre_ia = "".join(c for c in nombre_ia if c.isalnum() or c in ('_', '-'))
+                nombre_archivo_acta = f"{nombre_ia}.docx" if nombre_ia else f"Acta_Asamblea_{session_id[:8]}.docx"
+            except Exception:
+                nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
+        else:
+            # Limpiar el nombre personalizado ingresado por el usuario
+            nombre_limpio = nombre_personalizado.strip().replace(" ", "_")
+            nombre_limpio = "".join(c for c in nombre_limpio if c.isalnum() or c in ('_', '-', '.'))
+            nombre_archivo_acta = nombre_limpio if nombre_limpio.endswith(".docx") else f"{nombre_limpio}.docx"
+
+        output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
 
         # Construcción del prompt unificado de sistema
         prompt_sistema = PROMPT_SISTEMA_ACTAS
@@ -356,7 +388,6 @@ async def procesar_asamblea(
                 
         doc.save(output_docx_path)
 
-        nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
         peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
         
         data_acta = {
@@ -378,7 +409,7 @@ async def procesar_asamblea(
         return FileResponse(
             path=output_docx_path,
             filename=nombre_archivo_acta,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.Document"
         )
 
     except Exception as e:
