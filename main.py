@@ -614,4 +614,4 @@ async def procesar_asamblea(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+            os.remove(temp_audio_path) 
