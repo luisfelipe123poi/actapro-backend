@@ -642,3 +642,131 @@ async def procesar_asamblea(
     finally:
         if os.path.exists(temp_audio_path):
             os.remove(temp_audio_path)
+
+@app.get("/api/actas/descargar/{acta_id}")
+async def descargar_acta(acta_id: str, email: str, formato: str = "pdf"):
+    # Buscar el acta en la base de datos por nombre o por _id de MongoDB
+    acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
+    if not acta:
+        try:
+            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+        except Exception:
+            pass
+            
+    if not acta:
+        raise HTTPException(status_code=404, detail="Acta no encontrada.")
+        
+    contenido_texto = acta.get("contenido", "")
+    nombre_base = acta.get("nombre_acta", "acta").replace(".docx", "").replace(".pdf", "")
+    
+    formato = formato.lower().strip()
+    
+    # --- GENERACIÓN DE PDF ---
+    if formato == "pdf":
+        nombre_archivo = f"{nombre_base}.pdf"
+        pdf_buffer = io.BytesIO()
+        
+        doc = SimpleDocTemplate(
+            pdf_buffer, 
+            pagesize=letter,
+            rightMargin=54,
+            leftMargin=54,
+            topMargin=54,
+            bottomMargin=54
+        )
+        
+        story = []
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            'ActaTitle',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=13,
+            leading=16,
+            alignment=TA_LEFT,
+            spaceAfter=15,
+            textColor=styles['Normal'].textColor
+        )
+        
+        body_style = ParagraphStyle(
+            'ActaBody',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            leading=14,
+            alignment=TA_JUSTIFY,
+            spaceAfter=8
+        )
+        
+        story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
+        story.append(Spacer(1, 10))
+        
+        for linea in contenido_texto.split('\n'):
+            linea_limpia = linea.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            linea_limpia = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', linea_limpia)
+            linea_limpia = linea_limpia.replace('*', '').strip()
+            
+            if linea_limpia:
+                story.append(Paragraph(linea_limpia, body_style))
+            else:
+                story.append(Spacer(1, 6))
+
+        doc.build(story)
+        pdf_buffer.seek(0)
+        
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+        )
+        
+    # --- GENERACIÓN DE WORD (DOCX) ---
+    elif formato in ["docx", "word"]:
+        nombre_archivo = f"{nombre_base}.docx"
+        os.makedirs("temp_outputs", exist_ok=True)
+        output_docx_path = f"temp_outputs/{nombre_archivo}"
+        
+        doc = Document()
+        titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
+        titulo_principal.alignment = 1
+
+        for linea in contenido_texto.split("\n"):
+            linea_clean = linea.strip()
+            if not linea_clean:
+                continue
+
+            if linea_clean.startswith("# "):
+                doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
+            elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
+                doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
+            else:
+                p = doc.add_paragraph()
+                if "**" in linea_clean:
+                    partes = linea_clean.split("**")
+                    for i, parte in enumerate(partes):
+                        if parte:
+                            run = p.add_run(parte)
+                            if i % 2 == 1:
+                                run.bold = True
+                else:
+                    p.add_run(linea_clean)
+
+        doc.save(output_docx_path)
+        
+        with open(output_docx_path, "rb") as f:
+            docx_bytes = f.read()
+            
+        if os.path.exists(output_docx_path):
+            try:
+                os.remove(output_docx_path)
+            except Exception:
+                pass
+
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.Document",
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Formato no válido. Use 'pdf' o 'docx'.")
