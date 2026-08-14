@@ -7,3 +7,4 @@ assemblyai
 openai
 python-docx
 python-multipart
+reportlab
