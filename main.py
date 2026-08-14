@@ -433,186 +433,185 @@ async def procesar_asamblea(
     email: str = Form(...),
     nombre_personalizado: Optional[str] = Form(None),
 ):
-  user = users_collection.find_one({"email": email})
-  if not user:
-    raise HTTPException(status_code=401, detail="Usuario no autenticado.")
+    user = users_collection.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no autenticado.")
 
-  if user["plan"] == "free" and user["tokens"] <= 0:
-    raise HTTPException(
-        status_code=403,
-        detail=(
-            "Has agotado tus 5 tokens gratuitos. Actualiza a un plan de pago."
-        ),
-    )
-
-  os.makedirs("temp_uploads", exist_ok=True)
-  os.makedirs("temp_outputs", exist_ok=True)
-
-  session_id = str(uuid.uuid4())
-  temp_audio_path = f"temp_uploads/{session_id}_{file.filename}"
-
-  try:
-    content_bytes = await file.read()
-    file_hash = hashlib.sha256(content_bytes).hexdigest()
-
-    cached_transcription = transripciones_collection.find_one(
-        {"file_hash": file_hash}
-    )
-
-    if cached_transcription:
-      print(
-          "💡 Audio duplicado detectado: Reutilizando transcripción guardada"
-          " para evitar gasto en AssemblyAI."
-      )
-      texto_transcrito = cached_transcription["texto_transcrito"]
-    else:
-      with open(temp_audio_path, "wb") as buffer:
-        buffer.write(content_bytes)
-
-      config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
-      transcriber = aai.Transcriber()
-      transcript = transcriber.transcribe(temp_audio_path, config=config)
-
-      if transcript.status == aai.TranscriptStatus.error:
+    if user["plan"] == "free" and user["tokens"] <= 0:
         raise HTTPException(
-            status_code=500, detail=f"Error en AssemblyAI: {transcript.error}"
+            status_code=403,
+            detail=(
+                "Has agotado tus 5 tokens gratuitos. Actualiza a un plan de pago."
+            ),
         )
 
-      texto_transcrito = ""
-      if transcript.utterances:
-        for utterance in transcript.utterances:
-          texto_transcrito += (
-              f"[Persona {utterance.speaker}]: {utterance.text}\n"
-          )
-      else:
-        texto_transcrito = transcript.text
+    os.makedirs("temp_uploads", exist_ok=True)
+    os.makedirs("temp_outputs", exist_ok=True)
 
-      transripciones_collection.insert_one({
-          "file_hash": file_hash,
-          "filename": file.filename,
-          "texto_transcrito": texto_transcrito,
-          "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-          "createdAt": datetime.datetime.utcnow(),
-      })
+    session_id = str(uuid.uuid4())
+    temp_audio_path = f"temp_uploads/{session_id}_{file.filename}"
 
-    if not nombre_personalizado or nombre_personalizado.strip() == "":
-      try:
-        prompt_nombre = f"""
+    try:
+        content_bytes = await file.read()
+        file_hash = hashlib.sha256(content_bytes).hexdigest()
+
+        cached_transcription = transripciones_collection.find_one(
+            {"file_hash": file_hash}
+        )
+
+        if cached_transcription:
+            print(
+                "💡 Audio duplicado detectado: Reutilizando transcripción guardada"
+                " para evitar gasto en AssemblyAI."
+            )
+            texto_transcrito = cached_transcription["texto_transcrito"]
+        else:
+            with open(temp_audio_path, "wb") as buffer:
+                buffer.write(content_bytes)
+
+            config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
+            transcriber = aai.Transcriber()
+            transcript = transcriber.transcribe(temp_audio_path, config=config)
+
+            if transcript.status == aai.TranscriptStatus.error:
+                raise HTTPException(
+                    status_code=500, detail=f"Error en AssemblyAI: {transcript.error}"
+                )
+
+            texto_transcrito = ""
+            if transcript.utterances:
+                for utterance in transcript.utterances:
+                    texto_transcrito += (
+                        f"[Persona {utterance.speaker}]: {utterance.text}\n"
+                    )
+            else:
+                texto_transcrito = transcript.text
+
+            transripciones_collection.insert_one({
+                "file_hash": file_hash,
+                "filename": file.filename,
+                "texto_transcrito": texto_transcrito,
+                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "createdAt": datetime.datetime.utcnow(),
+            })
+
+        # Lógica de nombre del acta
+        if not nombre_personalizado or nombre_personalizado.strip() == "":
+            try:
+                prompt_nombre = f"""
                 Analiza el siguiente fragmento de transcripción de una asamblea y extrae estrictamente el nombre del edificio, conjunto residencial, copropiedad o empresa mencionada. 
                 Responde ÚNICAMENTE con un nombre limpio apto para archivo (sin espacios, usa guiones bajos _, sin tildes ni caracteres especiales, por ejemplo: Acta_Asamblea_Edificio_Torre_Central).
                 
                 Transcripción:
                 {texto_transcrito[:2500]}...
                 """
-        resp_nombre = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt_nombre}],
-            temperature=0.2,
-        )
-        nombre_ia = (
-            resp_nombre.choices[0]
-            .message.content.strip()
-            .replace(" ", "_")
-        )
-        nombre_ia = "".join(
-            c for c in nombre_ia if c.isalnum() or c in ("_", "-")
-        )
-        nombre_archivo_acta = (
-            f"{nombre_ia}.docx"
-            if nombre_ia
-            else f"Acta_Asamblea_{session_id[:8]}.docx"
-        )
-      except Exception:
-        nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
-    else:
-      nombre_limpio = nombre_personalizado.strip().replace(" ", "_")
-      nombre_limpio = "".join(
-          c for c in nombre_limpio if c.isalnum() or c in ("_", "-", ".")
-      )
-      nombre_archivo_acta = (
-          nombre_limpio
-          if nombre_limpio.endswith(".docx")
-          else f"{nombre_limpio}.docx"
-      )
-
-    output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
-
-    prompt_sistema = PROMPT_SISTEMA_ACTAS
-    if instrucciones:
-      prompt_sistema += (
-          f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
-      )
-
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": prompt_sistema},
-            {
-                "role": "user",
-                "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}",
-            },
-        ],
-        temperature=0.3,
-    )
-
-    acta_final = response.choices[0].message.content
-
-    doc = Document()
-    titulo_principal = doc.add_heading(
-        "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0
-    )
-    titulo_principal.alignment = 1
-
-    for linea in acta_final.split("\n"):
-      linea_clean = linea.strip()
-      if not linea_clean:
-        continue
-
-      if linea_clean.startswith("# "):
-        doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
-      elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
-        doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
-      else:
-        p = doc.add_paragraph()
-        if "**" in linea_clean:
-          partes = linea_clean.split("**")
-          for i, parte in enumerate(partes):
-            if parte:
-              run = p.add_run(parte)
-              if i % 2 == 1:
-                run.bold = True
+                resp_nombre = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt_nombre}],
+                    temperature=0.2,
+                )
+                nombre_ia = (
+                    resp_nombre.choices[0]
+                    .message.content.strip()
+                    .replace(" ", "_")
+                )
+                nombre_ia = "".join(
+                    c for c in nombre_ia if c.isalnum() or c in ("_", "-")
+                )
+                nombre_archivo_acta = (
+                    f"{nombre_ia}.docx"
+                    if nombre_ia
+                    else f"Acta_Asamblea_{session_id[:8]}.docx"
+                )
+            except Exception:
+                nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
         else:
-          p.add_run(linea_clean)
+            nombre_limpio = nombre_personalizado.strip().replace(" ", "_")
+            nombre_limpio = "".join(
+                c for c in nombre_limpio if c.isalnum() or c in ("_", "-", ".")
+            )
+            # Asegurar que no tenga extensiones duplicadas
+            nombre_base = nombre_limpio.replace(".docx", "")
+            nombre_archivo_acta = f"{nombre_base}.docx"
 
-    doc.save(output_docx_path)
+        output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
 
-    peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
+        prompt_sistema = PROMPT_SISTEMA_ACTAS
+        if instrucciones:
+            prompt_sistema += (
+                f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
+            )
 
-    data_acta = {
-        "email": email,
-        "nombre_acta": nombre_archivo_acta,
-        "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "peso": peso_archivo,
-        "contenido": acta_final,
-    }
-    actas_collection.insert_one(data_acta)
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt_sistema},
+                {
+                    "role": "user",
+                    "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}",
+                },
+            ],
+            temperature=0.3,
+        )
 
-    if user["plan"] == "free":
-      nuevos_tokens = user["tokens"] - 1
-      users_collection.update_one(
-          {"email": email}, {"$set": {"tokens": nuevos_tokens}}
-      )
+        acta_final = response.choices[0].message.content
 
-    return FileResponse(
-        path=output_docx_path,
-        filename=nombre_archivo_acta,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.Document"
-        ),
-    )
+        doc = Document()
+        titulo_principal = doc.add_heading(
+            "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0
+        )
+        titulo_principal.alignment = 1
 
-  except Exception as e:
-    raise HTTPException(status_code=500, detail=str(e))
-  finally:
-    if os.path.exists(temp_audio_path):
-      os.remove(temp_audio_path)
+        for linea in acta_final.split("\n"):
+            linea_clean = linea.strip()
+            if not linea_clean:
+                continue
+
+            if linea_clean.startswith("# "):
+                doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
+            elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
+                doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
+            else:
+                p = doc.add_paragraph()
+                if "**" in linea_clean:
+                    partes = linea_clean.split("**")
+                    for i, parte in enumerate(partes):
+                        if parte:
+                            run = p.add_run(parte)
+                            if i % 2 == 1:
+                                run.bold = True
+                else:
+                    p.add_run(linea_clean)
+
+        doc.save(output_docx_path)
+
+        peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
+
+        data_acta = {
+            "email": email,
+            "nombre_acta": nombre_archivo_acta,
+            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "peso": peso_archivo,
+            "contenido": acta_final,
+        }
+        actas_collection.insert_one(data_acta)
+
+        if user["plan"] == "free":
+            nuevos_tokens = user["tokens"] - 1
+            users_collection.update_one(
+                {"email": email}, {"$set": {"tokens": nuevos_tokens}}
+            )
+
+        return FileResponse(
+            path=output_docx_path,
+            filename=nombre_archivo_acta,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.Document"
+            ),
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
