@@ -99,6 +99,28 @@ class PaymentPreferenceModel(BaseModel):
     plan_name: str
     price: Optional[float] = None
 
+app.put('/api/actas/renombrar', async (req, res) => {
+    const { email, acta_id, nuevo_nombre } = req.body;
+    // Lógica para actualizar en la base de datos...
+    try {
+        // Ejemplo: Actualizar acta donde id sea acta_id y pertenezca al usuario
+        res.status(200).json({ message: "Acta renombrada con éxito" });
+    } catch (error) {
+        res.status(500).json({ error: "Error en el servidor" });
+    }
+}); 
+
+app.delete('/api/actas/eliminar', async (req, res) => {
+    const { email, acta_id } = req.body;
+    // Lógica para eliminar de la base de datos...
+    try {
+        res.status(200).json({ message: "Acta eliminada correctamente" });
+    } catch (error) {
+        res.status(500).json({ error: "Error en el servidor" });
+    }
+}); 
+
+
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
     existing_user = users_collection.find_one({"email": data.email})
@@ -253,6 +275,7 @@ async def webhook_mercadopago(request: Request):
         print(f"Error en webhook: {e}")
         
     return {"status": "ok"}
+    
 
 @app.post("/procesar")
 async def procesar_asamblea(
