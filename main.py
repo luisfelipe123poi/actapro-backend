@@ -242,62 +242,89 @@ async def eliminar_acta(data: EliminarActaRequest):
 
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
-  # Buscar el acta en la base de datos por nombre o por _id de MongoDB
-  acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
-  if not acta:
-    from bson import ObjectId
-    try:
-      acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-    except Exception:
-      pass
-      
-  if not acta:
-    raise HTTPException(status_code=404, detail="Acta no encontrada.")
-      
-  contenido_texto = acta.get("contenido", "")
-  nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", ".pdf")
-  
-  # Generar PDF en memoria usando ReportLab
-  pdf_buffer = io.BytesIO()
-  p = canvas.Canvas(pdf_buffer, pagesize=letter)
-  width, height = letter
-  
-  margin = 50
-  y_position = height - margin
-  p.setFont("Helvetica-Bold", 14)
-  p.drawString(margin, y_position, "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS")
-  y_position -= 30
-  
-  p.setFont("Helvetica", 10)
-  lineas = contenido_texto.split('\n')
-  
-  for linea in lineas:
-      if y_position < margin:
-          p.showPage()
-          p.setFont("Helvetica", 10)
-          y_position = height - margin
-          
-      linea_limpia = linea.replace("**", "").replace("#", "").strip()
-      if linea_limpia:
-          if len(linea_limpia) > 95:
-              chunks = [linea_limpia[i:i+95] for i in range(0, len(linea_limpia), 95)]
-              for chunk in chunks:
-                  p.drawString(margin, y_position, chunk)
-                  y_position -= 15
-          else:
-              p.drawString(margin, y_position, linea_limpia)
-              y_position -= 15
-      else:
-          y_position -= 10
+    # Buscar el acta en la base de datos por nombre o por _id de MongoDB
+    acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
+    if not acta:
+        try:
+            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+        except Exception:
+            pass
+            
+    if not acta:
+        raise HTTPException(status_code=404, detail="Acta no encontrada.")
+        
+    contenido_texto = acta.get("contenido", "")
+    nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", "").replace(".pdf", "") + ".pdf"
+    
+    # Configuración del PDF en memoria usando ReportLab Platypus
+    pdf_buffer = io.BytesIO()
+    
+    # Márgenes de 0.5 pulgadas (36 puntos) o 54 puntos (3/4 de pulgada)
+    doc = SimpleDocTemplate(
+        pdf_buffer, 
+        pagesize=letter,
+        rightMargin=54,
+        leftMargin=54,
+        topMargin=54,
+        bottomMargin=54
+    )
+    
+    story = []
+    
+    # Estilos profesionales
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'ActaTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=13,
+        leading=16,
+        alignment=TA_LEFT,
+        spaceAfter=15,
+        textColor=styles['Normal'].textColor
+    )
+    
+    body_style = ParagraphStyle(
+        'ActaBody',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        spaceAfter=8
+    )
+    
+    # Añadir título principal al documento
+    story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
+    story.append(Spacer(1, 10))
+    
+    # Procesar el contenido línea por línea o párrafo por párrafo
+    lineas = contenido_texto.split('\n')
+    for linea in lineas:
+        # Limpieza básica de caracteres Markdown para el reporte PDF
+        linea_limpia = linea.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        
+        # Reemplazar negritas de markdown (**texto**) por etiquetas HTML soportadas por ReportLab (<b>texto</b>)
+        import re
+        linea_limpia = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', linea_limpia)
+        linea_limpia = linea_limpia.replace('*', '').strip()
+        
+        if linea_limpia:
+            story.append(Paragraph(linea_limpia, body_style))
+        else:
+            # Si hay una línea vacía, agregamos un pequeño espacio vertical
+            story.append(Spacer(1, 6))
 
-  p.save()
-  pdf_buffer.seek(0)
-  
-  return Response(
-      content=pdf_buffer.getvalue(),
-      media_type="application/pdf",
-      headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
-  )
+    # Construir el PDF
+    doc.build(story)
+    pdf_buffer.seek(0)
+    
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+    )
 
 
 @app.post("/api/crear-preferencia-pago")
@@ -614,4 +641,4 @@ async def procesar_asamblea(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path) 
+            os.remove(temp_audio_path)
