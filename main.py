@@ -68,7 +68,7 @@ aai.settings.api_key = AAI_API_KEY
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Prompt enfocado en máxima exhaustividad y cero resumen innecesario
-    prompt_sistema = """
+    prompt_sistema = (
 Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
 Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
 
@@ -80,7 +80,7 @@ ORDEN DE TRABAJO (ESTRICTO):
    - DESARROLLO PUNTO POR PUNTO: Para CADA punto del orden del día, redacta el desarrollo de forma narrativa pero minuciosa. Transcribe los debates relevantes ("El copropietario A solicitó aclarar X; el administrador respondió que Y").
    - DECISIONES Y VOTACIONES: Registra el sentido de las votaciones y cualquier salvedad o constancia que los copropietarios hayan solicitado dejar por escrito.
 4. ESTILO Y FORMATO: Lenguaje jurídico formal, impersonal y preciso. Utiliza asteriscos dobles (ej: **$1.500.000** o **Aprobado por mayoría**) para resaltar en el texto cifras, costos, valores y decisiones clave. Redacta como si hubieras estado presente tomando nota exhaustiva de todo lo importante.
-"""
+)
 
 # Diccionario seguro de precios y planes controlados estrictamente en el backend
 PRECIOS_PLANES = {
