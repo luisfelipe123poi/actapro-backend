@@ -17,6 +17,7 @@ from pymongo import MongoClient
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import io
+from bson import ObjectId
 
 load_dotenv()
 
@@ -645,25 +646,51 @@ async def procesar_asamblea(
 
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
-    # 1. Buscar en MongoDB por ID o nombre
-    acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+    # 1. Buscar en MongoDB por ID o nombre asegurando el aislamiento del usuario
+    acta = None
+    try:
+        acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+    except Exception:
+        pass
+        
     if not acta:
         acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
-    
+        
     if not acta:
         raise HTTPException(status_code=404, detail="Acta no encontrada.")
         
-    contenido = acta.get("contenido", "")
-    nombre_archivo = acta.get("nombre_acta", "documento.docx")
+    contenido_texto = acta.get("contenido", "")
+    nombre_archivo = acta.get("nombre_acta", "Acta_Asamblea.docx")
     
-    # 2. Recrear el archivo .docx temporalmente para poder enviarlo
+    # 2. Recrear el archivo .docx temporalmente con formato completo
+    os.makedirs("temp_outputs", exist_ok=True)
     temp_path = f"temp_outputs/download_{acta_id}.docx"
     
-    from docx import Document
     doc = Document()
-    # (Aquí deberías replicar la lógica de creación que usaste en /procesar)
-    # Por simplicidad, guardamos el contenido texto:
-    doc.add_paragraph(contenido) 
+    titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
+    titulo_principal.alignment = 1
+
+    for linea in contenido_texto.split("\n"):
+        linea_clean = linea.strip()
+        if not linea_clean:
+            continue
+
+        if linea_clean.startswith("# "):
+            doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
+        elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
+            doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
+        else:
+            p = doc.add_paragraph()
+            if "**" in linea_clean:
+                partes = linea_clean.split("**")
+                for i, parte in enumerate(partes):
+                    if parte:
+                        run = p.add_run(parte)
+                        if i % 2 == 1:
+                            run.bold = True
+            else:
+                p.add_run(linea_clean)
+
     doc.save(temp_path)
     
     return FileResponse(
