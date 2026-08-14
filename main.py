@@ -698,3 +698,82 @@ async def descargar_acta(acta_id: str, email: str):
         filename=nombre_archivo,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+
+@app.get("/api/actas/descargar-pdf/{acta_id}")
+async def descargar_acta_pdf(acta_id: str, email: str):
+    # Buscar el acta en la base de datos por _id de MongoDB o por nombre
+    acta = None
+    try:
+        acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+    except Exception:
+        pass
+        
+    if not acta:
+        acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
+        
+    if not acta:
+        raise HTTPException(status_code=404, detail="Acta no encontrada.")
+        
+    contenido_texto = acta.get("contenido", "")
+    nombre_base = acta.get("nombre_acta", "Acta_Asamblea").replace(".docx", "").replace(".pdf", "")
+    nombre_archivo_pdf = f"{nombre_base}.pdf"
+    
+    # Configuración del PDF en memoria usando ReportLab
+    pdf_buffer = io.BytesIO()
+    
+    doc = SimpleDocTemplate(
+        pdf_buffer, 
+        pagesize=letter,
+        rightMargin=54,
+        leftMargin=54,
+        topMargin=54,
+        bottomMargin=54
+    )
+    
+    story = []
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'ActaTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=13,
+        leading=16,
+        alignment=TA_LEFT,
+        spaceAfter=15,
+        textColor=styles['Normal'].textColor
+    )
+    
+    body_style = ParagraphStyle(
+        'ActaBody',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        spaceAfter=8
+    )
+    
+    story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
+    story.append(Spacer(1, 10))
+    
+    lineas = contenido_texto.split('\n')
+    for linea in lineas:
+        linea_limpia = linea.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        import re
+        linea_limpia = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', linea_limpia)
+        linea_limpia = linea_limpia.replace('*', '').strip()
+        
+        if linea_limpia:
+            story.append(Paragraph(linea_limpia, body_style))
+        else:
+            story.append(Spacer(1, 6))
+
+    doc.build(story)
+    pdf_buffer.seek(0)
+    
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
+    )
