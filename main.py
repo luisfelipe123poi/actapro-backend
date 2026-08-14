@@ -2,21 +2,25 @@ import datetime
 import hashlib
 import os
 import shutil
+import uuid
 from typing import Optional
 import assemblyai as aai
 from docx import Document
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 import mercadopago
 from openai import OpenAI
 from pydantic import BaseModel
 from pymongo import MongoClient
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import io
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.3")
+app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -103,7 +107,7 @@ class PaymentPreferenceModel(BaseModel):
 
 class RenombrarActaRequest(BaseModel):
   email: str
-  acta_id: str  # Nota: si usas el _id de MongoDB como string o el nombre anterior, ajústalo según tu lógica
+  acta_id: str
   nuevo_nombre: str
 
 
@@ -167,13 +171,10 @@ def get_user_status(email: str):
 
 @app.get("/api/actas/historial")
 def obtener_historial_actas(email: str):
-  # Si necesitas el _id convertido a string para las peticiones de borrado/renombrado, puedes proyectarlo o incluirlo:
   actas_cursor = actas_collection.find({"email": email})
   actas = []
   for doc in actas_cursor:
-    doc["id"] = str(
-        doc["_id"]
-    )  # Asegura que el frontend reciba un campo 'id' limpio
+    doc["id"] = str(doc["_id"])
     del doc["_id"]
     actas.append(doc)
   return {"actas": actas}
@@ -182,14 +183,12 @@ def obtener_historial_actas(email: str):
 @app.put("/api/actas/renombrar")
 async def renombrar_acta(data: RenombrarActaRequest):
   try:
-    # Buscar y actualizar el nombre del acta en MongoDB asegurando que pertenezca al usuario
     resultado = actas_collection.update_one(
         {"email": data.email, "nombre_acta": data.acta_id},
         {"$set": {"nombre_acta": data.nuevo_nombre}},
     )
 
     if resultado.matched_count == 0:
-      # Intento alternativo por si acta_id fuera un _id de Mongo en formato string
       from bson import ObjectId
 
       try:
@@ -215,7 +214,6 @@ async def renombrar_acta(data: RenombrarActaRequest):
 @app.delete("/api/actas/eliminar")
 async def eliminar_acta(data: EliminarActaRequest):
   try:
-    # Intentar eliminar por nombre_acta o por _id de MongoDB
     resultado = actas_collection.delete_one(
         {"email": data.email, "nombre_acta": data.acta_id}
     )
@@ -240,6 +238,66 @@ async def eliminar_acta(data: EliminarActaRequest):
     raise he
   except Exception as e:
     raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/actas/descargar-pdf/{acta_id}")
+async def descargar_acta_pdf(acta_id: str, email: str):
+  # Buscar el acta en la base de datos por nombre o por _id de MongoDB
+  acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
+  if not acta:
+    from bson import ObjectId
+    try:
+      acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+    except Exception:
+      pass
+      
+  if not acta:
+    raise HTTPException(status_code=404, detail="Acta no encontrada.")
+      
+  contenido_texto = acta.get("contenido", "")
+  nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", ".pdf")
+  
+  # Generar PDF en memoria usando ReportLab
+  pdf_buffer = io.BytesIO()
+  p = canvas.Canvas(pdf_buffer, pagesize=letter)
+  width, height = letter
+  
+  margin = 50
+  y_position = height - margin
+  p.setFont("Helvetica-Bold", 14)
+  p.drawString(margin, y_position, "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS")
+  y_position -= 30
+  
+  p.setFont("Helvetica", 10)
+  lineas = contenido_texto.split('\n')
+  
+  for linea in lineas:
+      if y_position < margin:
+          p.showPage()
+          p.setFont("Helvetica", 10)
+          y_position = height - margin
+          
+      linea_limpia = linea.replace("**", "").replace("#", "").strip()
+      if linea_limpia:
+          if len(linea_limpia) > 95:
+              chunks = [linea_limpia[i:i+95] for i in range(0, len(linea_limpia), 95)]
+              for chunk in chunks:
+                  p.drawString(margin, y_position, chunk)
+                  y_position -= 15
+          else:
+              p.drawString(margin, y_position, linea_limpia)
+              y_position -= 15
+      else:
+          y_position -= 10
+
+  p.save()
+  pdf_buffer.seek(0)
+  
+  return Response(
+      content=pdf_buffer.getvalue(),
+      media_type="application/pdf",
+      headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+  )
 
 
 @app.post("/api/crear-preferencia-pago")
@@ -367,75 +425,6 @@ async def webhook_mercadopago(request: Request):
 
   return {"status": "ok"}
 
-from fastapi.responses import Response
-# Si prefieres generar el PDF al vuelo desde el contenido guardado en la base de datos:
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import io
-
-@app.get("/api/actas/descargar-pdf/{acta_id}")
-async def descargar_acta_pdf(acta_id: str, email: str):
-    # Buscar el acta en la base de datos por su nombre o ID
-    acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
-    if not acta:
-        from bson import ObjectId
-        try:
-            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-        except Exception:
-            pass
-            
-    if not acta:
-        raise HTTPException(status_code=404, detail="Acta no encontrada.")
-        
-    contenido_texto = acta.get("contenido", "")
-    nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", ".pdf")
-    
-    # Generar PDF en memoria usando ReportLab
-    pdf_buffer = io.BytesIO()
-    p = canvas.Canvas(pdf_buffer, pagesize=letter)
-    width, height = letter
-    
-    # Configuración básica de impresión de texto en PDF
-    margin = 50
-    y_position = height - margin
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(margin, y_position, "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS")
-    y_position -= 30
-    
-    p.setFont("Helvetica", 10)
-    lineas = contenido_texto.split('\n')
-    
-    for linea in lineas:
-        if y_position < margin:
-            p.showPage()
-            p.setFont("Helvetica", 10)
-            y_position = height - margin
-            
-        # Limpiar etiquetas de formato markdown simples para el PDF
-        linea_limpia = linea.replace("**", "").replace("#", "").strip()
-        if linea_limpia:
-            # Dividir líneas largas para que no se salgan de la página
-            if len(linea_limpia) > 95:
-                chunks = [linea_limpia[i:i+95] for i in range(0, len(linea_limpia), 95)]
-                for chunk in chunks:
-                    p.drawString(margin, y_position, chunk)
-                    y_position -= 15
-            else:
-                p.drawString(margin, y_position, linea_limpia)
-                y_position -= 15
-        else:
-            y_position -= 10 # Espacio entre párrafos
-
-    p.save()
-    pdf_buffer.seek(0)
-    
-    return Response(
-        content=pdf_buffer.getvalue(),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
-    )
-
-
 
 @app.post("/procesar")
 async def procesar_asamblea(
@@ -465,10 +454,8 @@ async def procesar_asamblea(
   try:
     content_bytes = await file.read()
 
-    # Calcular hash SHA-256 del archivo de audio para reutilizar transcripciones y ahorrar costos en AssemblyAI
     file_hash = hashlib.sha256(content_bytes).hexdigest()
 
-    # Verificar si ya existe una copia de la transcripción guardada en MongoDB para este mismo audio
     cached_transcription = transripciones_collection.find_one(
         {"file_hash": file_hash}
     )
@@ -501,7 +488,6 @@ async def procesar_asamblea(
       else:
         texto_transcrito = transcript.text
 
-      # Guardar la copia de la transcripción en base de datos con TTL de 30 días
       transripciones_collection.insert_one({
           "file_hash": file_hash,
           "filename": file.filename,
@@ -510,10 +496,8 @@ async def procesar_asamblea(
           "createdAt": datetime.datetime.utcnow(),
       })
 
-    # Determinación o Autogeneración Inteligente del Nombre del Documento
     if not nombre_personalizado or nombre_personalizado.strip() == "":
       try:
-        # Pedir a OpenAI que extraiga el nombre del edificio/empresa de la transcripción
         prompt_nombre = f"""
                 Analiza el siguiente fragmento de transcripción de una asamblea y extrae estrictamente el nombre del edificio, conjunto residencial, copropiedad o empresa mencionada. 
                 Responde ÚNICAMENTE con un nombre limpio apto para archivo (sin espacios, usa guiones bajos _, sin tildes ni caracteres especiales, por ejemplo: Acta_Asamblea_Edificio_Torre_Central).
@@ -531,7 +515,6 @@ async def procesar_asamblea(
             .message.content.strip()
             .replace(" ", "_")
         )
-        # Limpiar caracteres raros si los hubiera
         nombre_ia = "".join(
             c for c in nombre_ia if c.isalnum() or c in ("_", "-")
         )
@@ -543,7 +526,6 @@ async def procesar_asamblea(
       except Exception:
         nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
     else:
-      # Limpiar el nombre personalizado ingresado por el usuario
       nombre_limpio = nombre_personalizado.strip().replace(" ", "_")
       nombre_limpio = "".join(
           c for c in nombre_limpio if c.isalnum() or c in ("_", "-", ".")
@@ -556,14 +538,12 @@ async def procesar_asamblea(
 
     output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
 
-    # Construcción del prompt unificado de sistema
     prompt_sistema = PROMPT_SISTEMA_ACTAS
     if instrucciones:
       prompt_sistema += (
           f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
       )
 
-    # Procesamiento inteligente con OpenAI usando GPT-4o-mini
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -578,7 +558,6 @@ async def procesar_asamblea(
 
     acta_final = response.choices[0].message.content
 
-    # Generación avanzada del documento Word con soporte de títulos y formato de negritas automáticas
     doc = Document()
     titulo_principal = doc.add_heading(
         "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0
@@ -637,4 +616,4 @@ async def procesar_asamblea(
     raise HTTPException(status_code=500, detail=str(e))
   finally:
     if os.path.exists(temp_audio_path):
-      os.remove(temp_audio_path) 
+      os.remove(temp_audio_path)
