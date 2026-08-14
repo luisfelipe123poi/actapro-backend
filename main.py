@@ -68,7 +68,7 @@ aai.settings.api_key = AAI_API_KEY
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Prompt enfocado en máxima exhaustividad y cero resumen innecesario
-PROMPT_SISTEMA_ACTAS = """
+prompt_sistema = """
 Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
 Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
 
