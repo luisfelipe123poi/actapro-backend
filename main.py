@@ -22,6 +22,33 @@ from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
 import io
 from bson import ObjectId
 import re
+import datetime
+import hashlib
+import io
+import os
+import re
+import shutil
+import uuid
+from typing import Optional
+
+import assemblyai as aai
+from bson import ObjectId
+from docx import Document
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
+import mercadopago
+import pdfplumber
+import pymupdf as fitz
+from openai import OpenAI
+from pydantic import BaseModel
+from pymongo import MongoClient
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 load_dotenv()
 
