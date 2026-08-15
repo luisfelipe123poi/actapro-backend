@@ -705,7 +705,7 @@ async def descargar_acta(acta_id: str, email: str):
     )
 
 import os
-import PyMuPDF
+import pymupdf
 import pdfplumber
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from typing import Optional
