@@ -704,29 +704,83 @@ async def descargar_acta(acta_id: str, email: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+import os
+import fitz  # PyMuPDF
+import pdfplumber
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from typing import Optional
+from openai import OpenAI
+
+# Inicializa el cliente de OpenAI
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 @app.post("/escanear")
 async def escanear_documento(
     file: UploadFile = File(...), 
-    email: Optional[str] = Form(None)  # <-- Aquí está la corrección clave
+    email: Optional[str] = Form(None)
 ):
     try:
-        # 1. Leer el contenido del archivo recibido
-        contenido_archivo = await file.read()
+        # 1. Leer los bytes del archivo subido desde el frontend
+        file_bytes = await file.read()
+        filename = file.filename.lower()
         
-        # 2. Lógica de procesamiento de IA o documento
-        resultado_analisis = f"Documento '{file.filename}' procesado y digitalizado correctamente bajo los parámetros de Propiedad Horizontal."
+        texto_extraido = ""
 
-        # 3. Retornar la respuesta en formato JSON que espera el Frontend
+        # 2. Extracción real según el formato del archivo
+        if filename.endswith(".pdf"):
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                texto_pagina = page.get_text()
+                
+                if texto_pagina.strip():
+                    texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
+            
+            doc.close()
+            
+            # Respaldo con pdfplumber si es necesario para tablas
+            if len(texto_extraido.strip()) < 50:
+                import io
+                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                    for i, page in enumerate(pdf.pages):
+                        t = page.extract_text()
+                        if t:
+                            texto_extraido += f"\n--- Página (Tablas) {i + 1} ---\n" + t
+
+        elif filename.endswith((".txt", ".doc", ".docx")):
+            texto_extraido = file_bytes.decode("utf-8", errors="ignore")
+        else:
+            raise HTTPException(status_code=400, detail="Formato de archivo no soportado. Sube un PDF o documento de texto.")
+
+        if not texto_extraido.strip():
+            raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
+
+        # 3. Transcripción limpia sin modificar ni estructurar contenido (Paso opcional por si deseas corregir saltos de línea raros, o puedes retornar directamente `texto_extraido`)
+        response_openai = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Eres un transcriptor de documentos profesional. Tu única tarea es devolver de forma fiel, exacta y limpia el texto que se te proporciona, sin omitir partes, sin resumir, sin inventar y sin aplicar estructuras legales ni interpretaciones. Transcribe tal cual."
+                },
+                {
+                    "role": "user",
+                    "content": f"Transcribe íntegramente el siguiente texto extraído:\n\n{texto_extraido[:15000]}"
+                }
+            ],
+            temperature=0.0,
+        ]
+
+        resultado_ia = response_openai.choices[0].message.content
+
+        # 4. Retornar el texto plano/transcrito al Frontend
         return {
             "status": "success",
-            "transcripcion": resultado_analisis
+            "transcripcion": resultado_ia
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error procesando el archivo: {str(e)}")
 
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
