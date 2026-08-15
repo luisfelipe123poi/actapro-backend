@@ -833,7 +833,8 @@ REGLAS ESTRICTAS:
             temperature=0.0
         )
 
-        resultado_html = response_openai.choices0.message.content.strip()
+        # CORREGIDO: Se agregó [0] correctamente a choices
+        resultado_html = response_openai.choices[0].message.content.strip()
 
         # Limpieza defensiva por si el modelo por inercia agrega bloques de código
         if resultado_html.startswith("```html"):
