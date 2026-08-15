@@ -755,7 +755,7 @@ async def escanear_documento(
         if not texto_extraido.strip():
             raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
 
-        # 3. Transcripción limpia sin modificar ni estructurar contenido (Paso opcional por si deseas corregir saltos de línea raros, o puedes retornar directamente `texto_extraido`)
+        # 3. Transcripción limpia con OpenAI GPT-4o
         response_openai = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -768,8 +768,8 @@ async def escanear_documento(
                     "content": f"Transcribe íntegramente el siguiente texto extraído:\n\n{texto_extraido[:15000]}"
                 }
             ],
-            temperature=0.0,
-        ]
+            temperature=0.0
+        )
 
         resultado_ia = response_openai.choices[0].message.content
 
