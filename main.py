@@ -741,16 +741,7 @@ from openai import OpenAI
 # Inicializa el cliente de OpenAI
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-import base64
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from typing import Optional
 
-import base64
-import io
-from typing import Optional
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-import fitz  # PyMuPDF
-import pdfplumber
 
 @app.post("/escanear")
 async def escanear_documento(
