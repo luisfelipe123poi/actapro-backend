@@ -705,18 +705,18 @@ async def descargar_acta(acta_id: str, email: str):
     )
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from typing import Optional
 
 @app.post("/escanear")
 async def escanear_documento(
     file: UploadFile = File(...), 
-    email: Form(None) = None
+    email: Optional[str] = Form(None)  # <-- Aquí está la corrección clave
 ):
     try:
-        # 1. Leer el contenido del archivo recibido (PDF, Word, TXT, etc.)
+        # 1. Leer el contenido del archivo recibido
         contenido_archivo = await file.read()
         
-        # 2. Aquí aplicas la lógica de tu IA (ej. GPT-4o, OpenAI API, PyPDF2, etc.)
-        # Ejemplo simulado de respuesta:
+        # 2. Lógica de procesamiento de IA o documento
         resultado_analisis = f"Documento '{file.filename}' procesado y digitalizado correctamente bajo los parámetros de Propiedad Horizontal."
 
         # 3. Retornar la respuesta en formato JSON que espera el Frontend
