@@ -745,6 +745,13 @@ import base64
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from typing import Optional
 
+import base64
+import io
+from typing import Optional
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+import fitz  # PyMuPDF
+import pdfplumber
+
 @app.post("/escanear")
 async def escanear_documento(
     file: UploadFile = File(...), 
@@ -760,12 +767,11 @@ async def escanear_documento(
         
         # 2. Extracción según el formato del archivo
         if es_imagen:
-            # Si es imagen, preparamos la imagen en base64 para enviarla a GPT-4o Vision
             base64_image = base64.b64encode(file_bytes).decode("utf-8")
             contenido_usuario = [
                 {
                     "type": "text",
-                    "text": "Analiza este documento o imagen escaneada. Extrae la información replicando su estructura visual exacta. Si encuentras tablas de datos (ej. votaciones, presupuestos, estados financieros), devuélvelas estrictamente en formato de tabla Markdown (| Col 1 | Col 2 |). Identifica títulos con '#' y si detectas gráficos estadísticos o diagramas importantes, indica su presencia con la etiqueta [Gráfico: Descripción breve]."
+                    "text": "Analiza este documento o imagen escaneada. Extrae la información estructurando el diseño visual con etiquetas HTML semánticas corporativas (usa <h1>, <h2>, <p>, <table>, <thead>, <tbody>, <tr>, <th>, <td>). Aplica clases de Tailwind CSS para mantener un estilo profesional (ej. fuentes, bordes limpios, espaciados). NO uses Markdown, NO uses asteriscos, NO uses bloques de código de ningún tipo. Si hay tablas de datos, créalas completamente con etiquetas HTML. Si detectas gráficos estadísticos o diagramas, represetalos con un div estructurado con la clase 'p-4 border-2 border-dashed border-slate-300 bg-slate-50 text-center text-slate-500 rounded-lg text-xs my-4' indicando el contenido del gráfico."
                 },
                 {
                     "type": "image_url",
@@ -786,9 +792,8 @@ async def escanear_documento(
                 
                 doc.close()
                 
-                # Respaldo con pdfplumber si es necesario para tablas de PDFs
+                # Respaldo con pdfplumber para extracción precisa de tablas en PDFs
                 if len(texto_extraido.strip()) < 50:
-                    import io
                     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                         for i, page in enumerate(pdf.pages):
                             t = page.extract_text()
@@ -803,7 +808,13 @@ async def escanear_documento(
             if not texto_extraido.strip():
                 raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
 
-            contenido_usuario = f"""Analiza el siguiente texto extraído del documento. Replica su estructura visual. Si encuentras tablas de datos (ej. votaciones, presupuestos, estados financieros), devuélvelas estrictamente en formato de tabla Markdown (| Col 1 | Col 2 |). Identifica títulos con '#' y si detectas gráficos estadísticos o diagramas importantes, indica su presencia con la etiqueta [Gráfico: Descripción breve].
+            contenido_usuario = f"""Analiza el siguiente texto extraído del documento. Tu salida debe ser EXCLUSIVAMENTE HTML semántico corporativo listo para renderizar directamente en un navegador o contenedor web.
+- Replica la estructura visual y de secciones originales.
+- Usa <h1>, <h2> para títulos principales y de sección.
+- Usa <p> para párrafos con clases de Tailwind (ej. text-slate-900, text-xs, leading-relaxed).
+- Usa etiquetas de tabla completas (<table>, <thead>, <tbody>, <tr>, <td>) con bordes y clases corporativas si hay datos estructurados.
+- Si detectas referencias a gráficos, esquemas o diagramas, créalos como un bloque visual con borde punteado.
+- PROHIBIDO usar Markdown, asteriscos (*), guiones de lista markdown (#) o envolver el resultado en comillas de código markdown.
 
 Texto extraído:
 {texto_extraido[:15000]}"""
@@ -814,7 +825,14 @@ Texto extraído:
             messages=[
                 {
                     "role": "system",
-                    "content": "Eres un sistema experto de digitalización y transcripción documental para Propiedad Horizontal. Tu tarea es extraer la información del documento o imagen preservando la jerarquía visual: títulos (#), párrafos, tablas en formato Markdown exacto (| Columna | Columna |) y marcado de gráficos. No resumas, mantén el rigor del documento original."
+                    "content": """Eres un Ingeniero de Documentación y Diseñador Web experto en digitalización corporativa. 
+Tu única misión es transformar la información del documento de entrada en un bloque de código HTML puro, limpio y profesional integrado con clases de Tailwind CSS.
+REGLAS ESTRICTAS:
+1. Devuelve SOLAMENTE código HTML válido. No incluyas explicaciones previas ni texto fuera del HTML.
+2. NUNCA utilices sintaxis Markdown (*, #, -, ```html). El resultado debe ser texto plano que contenga exclusivamente el marcado HTML.
+3. Estructura tablas de datos con <table>, <thead>, <tbody>, <tr>, <th> y <td> aplicando clases limpias (ej. border border-slate-300 p-2).
+4. Representa gráficos detectados mediante un contenedor <div> con bordes punteados y diseño profesional.
+5. Mantén absoluta fidelidad a la estructura original del documento."""
                 },
                 {
                     "role": "user",
@@ -824,12 +842,21 @@ Texto extraído:
             temperature=0.0
         )
 
-        resultado_ia = response_openai.choices[0].message.content
+        resultado_html = response_openai.choices0.message.content.strip()
 
-        # 4. Retornar la transcripción estructurada al Frontend
+        # Limpieza defensiva por si el modelo por inercia agrega bloques de código
+        if resultado_html.startswith("```html"):
+            resultado_html = resultado_html[7:]
+        if resultado_html.startswith("```"):
+            resultado_html = resultado_html[3:]
+        if resultado_html.endswith("```"):
+            resultado_html = resultado_html[:-3]
+        resultado_html = resultado_html.strip()
+
+        # 4. Retornar el HTML estructurado al Frontend
         return {
             "status": "success",
-            "transcripcion": resultado_ia
+            "transcripcion": resultado_html
         }
 
     except Exception as e:
