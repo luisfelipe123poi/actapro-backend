@@ -8,3 +8,5 @@ openai
 python-docx
 python-multipart
 reportlab
+pymupdf
+pdfplumber
