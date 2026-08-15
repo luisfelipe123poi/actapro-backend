@@ -741,6 +741,10 @@ from openai import OpenAI
 # Inicializa el cliente de OpenAI
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
+import base64
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from typing import Optional
+
 @app.post("/escanear")
 async def escanear_documento(
     file: UploadFile = File(...), 
@@ -752,47 +756,69 @@ async def escanear_documento(
         filename = file.filename.lower()
         
         texto_extraido = ""
-
-        # 2. Extracción real según el formato del archivo
-        if filename.endswith(".pdf"):
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                texto_pagina = page.get_text()
-                
-                if texto_pagina.strip():
-                    texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
-            
-            doc.close()
-            
-            # Respaldo con pdfplumber si es necesario para tablas
-            if len(texto_extraido.strip()) < 50:
-                import io
-                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                    for i, page in enumerate(pdf.pages):
-                        t = page.extract_text()
-                        if t:
-                            texto_extraido += f"\n--- Página (Tablas) {i + 1} ---\n" + t
-
-        elif filename.endswith((".txt", ".doc", ".docx")):
-            texto_extraido = file_bytes.decode("utf-8", errors="ignore")
+        es_imagen = filename.endswith((".png", ".jpg", ".jpeg", ".webp"))
+        
+        # 2. Extracción según el formato del archivo
+        if es_imagen:
+            # Si es imagen, preparamos la imagen en base64 para enviarla a GPT-4o Vision
+            base64_image = base64.b64encode(file_bytes).decode("utf-8")
+            contenido_usuario = [
+                {
+                    "type": "text",
+                    "text": "Analiza este documento o imagen escaneada. Extrae la información replicando su estructura visual exacta. Si encuentras tablas de datos (ej. votaciones, presupuestos, estados financieros), devuélvelas estrictamente en formato de tabla Markdown (| Col 1 | Col 2 |). Identifica títulos con '#' y si detectas gráficos estadísticos o diagramas importantes, indica su presencia con la etiqueta [Gráfico: Descripción breve]."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                }
+            ]
         else:
-            raise HTTPException(status_code=400, detail="Formato de archivo no soportado. Sube un PDF o documento de texto.")
+            if filename.endswith(".pdf"):
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    texto_pagina = page.get_text()
+                    
+                    if texto_pagina.strip():
+                        texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
+                
+                doc.close()
+                
+                # Respaldo con pdfplumber si es necesario para tablas de PDFs
+                if len(texto_extraido.strip()) < 50:
+                    import io
+                    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                        for i, page in enumerate(pdf.pages):
+                            t = page.extract_text()
+                            if t:
+                                texto_extraido += f"\n--- Página (Tablas) {i + 1} ---\n" + t
 
-        if not texto_extraido.strip():
-            raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
+            elif filename.endswith((".txt", ".doc", ".docx")):
+                texto_extraido = file_bytes.decode("utf-8", errors="ignore")
+            else:
+                raise HTTPException(status_code=400, detail="Formato de archivo no soportado. Sube un PDF, imagen o documento de texto.")
 
-        # 3. Transcripción limpia con OpenAI GPT-4o
+            if not texto_extraido.strip():
+                raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
+
+            contenido_usuario = f"""Analiza el siguiente texto extraído del documento. Replica su estructura visual. Si encuentras tablas de datos (ej. votaciones, presupuestos, estados financieros), devuélvelas estrictamente en formato de tabla Markdown (| Col 1 | Col 2 |). Identifica títulos con '#' y si detectas gráficos estadísticos o diagramas importantes, indica su presencia con la etiqueta [Gráfico: Descripción breve].
+
+Texto extraído:
+{texto_extraido[:15000]}"""
+
+        # 3. Procesamiento inteligente y estructurado con OpenAI GPT-4o
         response_openai = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system",
-                    "content": "Eres un transcriptor de documentos profesional. Tu única tarea es devolver de forma fiel, exacta y limpia el texto que se te proporciona, sin omitir partes, sin resumir, sin inventar y sin aplicar estructuras legales ni interpretaciones. Transcribe tal cual."
+                    "content": "Eres un sistema experto de digitalización y transcripción documental para Propiedad Horizontal. Tu tarea es extraer la información del documento o imagen preservando la jerarquía visual: títulos (#), párrafos, tablas en formato Markdown exacto (| Columna | Columna |) y marcado de gráficos. No resumas, mantén el rigor del documento original."
                 },
                 {
                     "role": "user",
-                    "content": f"Transcribe íntegramente el siguiente texto extraído:\n\n{texto_extraido[:15000]}"
+                    "content": contenido_usuario
                 }
             ],
             temperature=0.0
@@ -800,7 +826,7 @@ async def escanear_documento(
 
         resultado_ia = response_openai.choices[0].message.content
 
-        # 4. Retornar el texto plano/transcrito al Frontend
+        # 4. Retornar la transcripción estructurada al Frontend
         return {
             "status": "success",
             "transcripcion": resultado_ia
