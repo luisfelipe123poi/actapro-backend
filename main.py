@@ -704,6 +704,30 @@ async def descargar_acta(acta_id: str, email: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+
+@app.post("/escanear")
+async def escanear_documento(
+    file: UploadFile = File(...), 
+    email: Form(None) = None
+):
+    try:
+        # 1. Leer el contenido del archivo recibido (PDF, Word, TXT, etc.)
+        contenido_archivo = await file.read()
+        
+        # 2. Aquí aplicas la lógica de tu IA (ej. GPT-4o, OpenAI API, PyPDF2, etc.)
+        # Ejemplo simulado de respuesta:
+        resultado_analisis = f"Documento '{file.filename}' procesado y digitalizado correctamente bajo los parámetros de Propiedad Horizontal."
+
+        # 3. Retornar la respuesta en formato JSON que espera el Frontend
+        return {
+            "status": "success",
+            "transcripcion": resultado_analisis
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
     # Buscar el acta en la base de datos por _id de MongoDB o por nombre
