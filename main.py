@@ -549,13 +549,6 @@ async def procesar_asamblea(
 
     plan_usuario = user.get("plan", "free")
 
-    # 1. Verificar tokens en plan gratuito
-    if plan_usuario == "free" and user.get("tokens", 0) <= 0:
-        raise HTTPException(
-            status_code=403,
-            detail="Has agotado tus tokens gratuitos. Actualiza a un plan de pago.",
-        )
-
     os.makedirs("temp_uploads", exist_ok=True)
     os.makedirs("temp_outputs", exist_ok=True)
 
@@ -569,7 +562,7 @@ async def procesar_asamblea(
         with open(temp_audio_path, "wb") as buffer:
             buffer.write(content_bytes)
 
-        # 1.1 Validar calidad técnica y obtener duración exacta usando ffmpeg.probe
+        # 1. Validar calidad técnica y obtener duración exacta usando ffmpeg.probe
         try:
             metadata = await __import__("asyncio").to_thread(ffmpeg.probe, temp_audio_path)
             format_data = metadata.get("format", {})
@@ -610,11 +603,11 @@ async def procesar_asamblea(
         # 2. Validar límite de duración por archivo individual según el plan
         limites_por_archivo = {
             "free": 30,          # Máximo 30 min por archivo
-            "basico": 180,        # Máximo 3 horas por archivo
+            "basico": 180,       # Máximo 3 horas por archivo
             "profesional": 300,  # Máximo 5 horas por archivo
             "corporativo": 600   # Máximo 10 horas por archivo
         }
-        limite_archivo_min = limites_por_archivo.get(plan_usuario, 15)
+        limite_archivo_min = limites_por_archivo.get(plan_usuario, 30)
         
         if duracion_minutos > limite_archivo_min:
             raise HTTPException(
@@ -777,15 +770,11 @@ async def procesar_asamblea(
         }
         actas_collection.insert_one(data_acta)
 
-        # 4. Actualizar consumo mensual de horas y tokens en la base de datos
-        nuevas_horas = horas_usadas_mes + (duracion_minutos / 60)
-        update_data = {"horas_usadas_mes": nuevas_horas}
-        
-        if plan_usuario == "free":
-            update_data["tokens"] = user.get("tokens", 1) - 1
-
+        # 4. Actualizar consumo mensual de horas sumando la duración real del audio procesado
+        nuevas_horas = horas_usadas_mes + (duracion_segundos / 3600.0)
         users_collection.update_one(
-            {"email": email}, {"$set": update_data}
+            {"email": email}, 
+            {"$set": {"horas_usadas_mes": nuevas_horas}}
         )
 
         return FileResponse(
