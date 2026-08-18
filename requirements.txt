@@ -11,3 +11,4 @@ reportlab
 pymupdf
 pdfplumber
 pydub
+ffmpeg-python==0.2.0
