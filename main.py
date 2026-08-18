@@ -112,16 +112,23 @@ PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Hori
 
 # Diccionario seguro de precios y planes controlados estrictamente en el backend
 PRECIOS_PLANES = {
-    "basico": {"nombre": "Plan Básico", "precio": 49000.0, "tokens": 50},
+    "basico": {
+        "nombre": "Plan Básico",
+        "precio": 153000.0,
+        "tokens": 50,
+        "limite_horas": 15.0
+    },
     "profesional": {
         "nombre": "Plan Profesional",
-        "precio": 149000.0,
+        "precio": 479000.0,
         "tokens": 200,
+        "limite_horas": 60.0,
     },
     "corporativo": {
         "nombre": "Plan Corporativo",
-        "precio": 299000.0,
+        "precio": 939000.0,
         "tokens": 9999,
+        "limite_horas": 200.0,
     },
 }
 
@@ -151,55 +158,57 @@ class EliminarActaRequest(BaseModel):
 
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
-  existing_user = users_collection.find_one({"email": data.email})
-  if existing_user:
-    raise HTTPException(status_code=400, detail="El correo ya está registrado.")
+    existing_user = users_collection.find_one({"email": data.email})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El correo ya está registrado.")
 
-  tokens_iniciales = 5 if data.plan == "free" else 9999
+    # Si es free, le damos 1 hora de prueba inicial; si es de pago, le damos un paquete alto (ej. 100 horas o ilimitado)
+    horas_iniciales = 1.0 if data.plan == "free" else 100.0 
 
-  nuevo_usuario = {
-      "email": data.email,
-      "password": data.password,
-      "plan": data.plan,
-      "tokens": tokens_iniciales,
-  }
+    nuevo_usuario = {
+        "email": data.email,
+        "password": data.password,
+        "plan": data.plan,
+        "horas_restantes": horas_iniciales, # <--- CAMBIADO DE tokens A horas_restantes
+        "horas_usadas_mes": 0.0, 
+    }
 
-  users_collection.insert_one(nuevo_usuario)
-  return {
-      "message": "Usuario registrado con éxito en MongoDB",
-      "email": data.email,
-      "plan": data.plan,
-      "tokens": tokens_iniciales,
-  }
+    users_collection.insert_one(nuevo_usuario)
+    return {
+        "message": "Usuario registrado con éxito en MongoDB",
+        "email": data.email,
+        "plan": data.plan,
+        "horas_restantes": horas_iniciales, # <--- SE DEVUELVE EL NUEVO CAMPO
+    }
 
 
 @app.post("/api/login")
 def login_usuario(data: AuthModel):
-  user = users_collection.find_one({"email": data.email})
-  if not user or user["password"] != data.password:
-    raise HTTPException(status_code=401, detail="Credenciales inválidas.")
+    user = users_collection.find_one({"email": data.email})
+    if not user or user["password"] != data.password:
+        raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
-  return {
-      "message": "Login exitoso",
-      "email": user["email"],
-      "plan": user["plan"],
-      "tokens": user["tokens"],
-  }
+    return {
+        "message": "Login exitoso",
+        "email": user["email"],
+        "plan": user["plan"],
+        "horas_restantes": user.get("horas_restantes", 0.0), # <--- SE LEE DE MONGO
+    }
 
 
 @app.get("/api/user/status")
 def get_user_status(email: str):
-  usuario = users_collection.find_one({"email": email})
-  if not usuario:
-    raise HTTPException(
-        status_code=404, detail="Usuario no encontrado en la base de datos"
-    )
+    usuario = users_collection.find_one({"email": email})
+    if not usuario:
+        raise HTTPException(
+            status_code=404, detail="Usuario no encontrado en la base de datos"
+        )
 
-  return {
-      "email": usuario.get("email"),
-      "plan": usuario.get("plan", "free"),
-      "tokens": usuario.get("tokens", 0),
-  }
+    return {
+        "email": usuario.get("email"),
+        "plan": usuario.get("plan", "free"),
+        "horas_restantes": usuario.get("horas_restantes", 0.0), # <--- SE MUESTRA AL CONSULTAR EL ESTADO
+    }
 
 
 @app.get("/api/actas/historial")
@@ -485,6 +494,46 @@ async def webhook_mercadopago(request: Request):
 
   return {"status": "ok"}
 
+import ffmpeg from 'fluent-ffmpeg';
+import fs from 'fs';
+
+// Función para validar la calidad técnica del audio
+function validarCalidadAudio(filePath) {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) {
+                return reject("No se pudo leer el archivo de audio. Puede estar corrupto.");
+            }
+
+            const format = metadata.format;
+            const bitRate = format.bit_rate; // Bits por segundo
+            const duration = format.duration; // Duración en segundos
+
+            // REGLA 1: Bitrate menor a 32 kbps (audio ultra comprimido o estática)
+            if (bitRate && bitRate < 32000) {
+                return resolve({
+                    valido: false,
+                    motivo: "AUDIO_MUY_COMPRIMIDO_O_DEFECTUOSO",
+                    mensaje: "El archivo presenta una calidad técnica deficiente (bitrate muy bajo). Esto impedirá una correcta identificación de oradores."
+                });
+            }
+
+            // REGLA 2: Audio demasiado corto (menos de 10 segundos para una asamblea)
+            if (duration && duration < 10) {
+                return resolve({
+                    valido: false,
+                    motivo: "AUDIO_DEMASIADO_CORTO",
+                    mensaje: "El archivo de audio es demasiado corto para ser una asamblea."
+                });
+            }
+
+            resolve({ valido: true });
+        });
+    });
+} 
+
+
+from pydub import AudioSegment
 
 @app.post("/procesar")
 async def procesar_asamblea(
@@ -497,12 +546,13 @@ async def procesar_asamblea(
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no autenticado.")
 
-    if user["plan"] == "free" and user["tokens"] <= 0:
+    plan_usuario = user.get("plan", "free")
+
+    # 1. Verificar tokens en plan gratuito
+    if plan_usuario == "free" and user.get("tokens", 0) <= 0:
         raise HTTPException(
             status_code=403,
-            detail=(
-                "Has agotado tus 5 tokens gratuitos. Actualiza a un plan de pago."
-            ),
+            detail="Has agotado tus tokens gratuitos. Actualiza a un plan de pago.",
         )
 
     os.makedirs("temp_uploads", exist_ok=True)
@@ -513,8 +563,88 @@ async def procesar_asamblea(
 
     try:
         content_bytes = await file.read()
-        file_hash = hashlib.sha256(content_bytes).hexdigest()
+        
+        # Guardar archivo temporalmente para validar calidad y duración
+        with open(temp_audio_path, "wb") as buffer:
+            buffer.write(content_bytes)
 
+        # 1.1 Validar calidad técnica del audio usando fluent-ffmpeg
+        def validar_calidad_audio_ffprobe(filePath):
+            returnkaisi = "fluent-ffmpeg" # Referencia al módulo importado
+            return __import__("asyncio").get_event_loop().run_in_executor(
+                None, 
+                lambda: __import__("fluent-ffmpeg").ffprobe(filePath)
+            )
+
+        try:
+            # Ejecución síncrona de ffprobe envuelta en un bloque seguro
+            metadata = await __import__("asyncio").to_thread(ffmpeg.ffprobe, temp_audio_path)
+            format_data = metadata.get("format", {})
+            bit_rate = format_data.get("bit_rate")
+            duration = format_data.get("duration")
+
+            if bit_rate and float(bit_rate) < 32000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="El archivo presenta una calidad técnica deficiente (bitrate muy bajo). Esto impedirá una correcta identificación de oradores."
+                )
+
+            if duration and float(duration) < 10:
+                raise HTTPException(
+                    status_code=400,
+                    detail="El archivo de audio es demasiado corto para ser una asamblea."
+                )
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail="No se pudo leer el archivo de audio. Puede estar corrupto o el formato no es compatible."
+            )
+
+        # Medir la duración exacta del audio en minutos
+        try:
+            audio_file = AudioSegment.from_file(temp_audio_path)
+            duracion_minutos = len(audio_file) / (1000 * 60)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"No se pudo leer la duración del audio. Asegúrate de que sea un formato válido (MP3, WAV, M4A). Detalle: {str(e)}"
+            )
+
+        # 2. Validar límite de duración por archivo individual según el plan
+        limites_por_archivo = {
+            "free": 15,          # Máximo 15 min por archivo
+            "basico": 90,        # Máximo 1.5 horas por archivo
+            "profesional": 240,  # Máximo 4 horas por archivo
+            "corporativo": 480   # Máximo 8 horas por archivo
+        }
+        limite_archivo_min = limites_por_archivo.get(plan_usuario, 15)
+        
+        if duracion_minutos > limite_archivo_min:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Este audio dura {round(duracion_minutos, 1)} minutos. Tu plan actual permite un límite máximo de {limite_archivo_min} minutos por archivo individual."
+            )
+
+        # 3. Validar límite de horas acumuladas en el mes
+        horas_usadas_mes = user.get("horas_usadas_mes", 0.0)
+        limites_mensuales = {
+            "free": 1.0,
+            "basico": 15.0,
+            "profesional": 60.0,
+            "corporativo": 200.0
+        }
+        limite_mes = limites_mensuales.get(plan_usuario, 1.0)
+
+        if horas_usadas_mes >= limite_mes:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Has alcanzado el límite de {limite_mes} horas mensuales de tu plan. Actualiza tu suscripción para seguir procesando actas."
+            )
+
+        # Caché de transcripción para evitar gastos duplicados en AssemblyAI
+        file_hash = hashlib.sha256(content_bytes).hexdigest()
         cached_transcription = transripciones_collection.find_one(
             {"file_hash": file_hash}
         )
@@ -526,9 +656,6 @@ async def procesar_asamblea(
             )
             texto_transcrito = cached_transcription["texto_transcrito"]
         else:
-            with open(temp_audio_path, "wb") as buffer:
-                buffer.write(content_bytes)
-
             config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
             transcriber = aai.Transcriber()
             transcript = transcriber.transcribe(temp_audio_path, config=config)
@@ -590,7 +717,6 @@ async def procesar_asamblea(
             nombre_limpio = "".join(
                 c for c in nombre_limpio if c.isalnum() or c in ("_", "-", ".")
             )
-            # Asegurar que no tenga extensiones duplicadas
             nombre_base = nombre_limpio.replace(".docx", "")
             nombre_archivo_acta = f"{nombre_base}.docx"
 
@@ -656,11 +782,16 @@ async def procesar_asamblea(
         }
         actas_collection.insert_one(data_acta)
 
-        if user["plan"] == "free":
-            nuevos_tokens = user["tokens"] - 1
-            users_collection.update_one(
-                {"email": email}, {"$set": {"tokens": nuevos_tokens}}
-            )
+        # 4. Actualizar consumo mensual de horas y tokens en la base de datos
+        nuevas_horas = horas_usadas_mes + (duracion_minutos / 60)
+        update_data = {"horas_usadas_mes": nuevas_horas}
+        
+        if plan_usuario == "free":
+            update_data["tokens"] = user.get("tokens", 1) - 1
+
+        users_collection.update_one(
+            {"email": email}, {"$set": update_data}
+        )
 
         return FileResponse(
             path=output_docx_path,
@@ -671,6 +802,8 @@ async def procesar_asamblea(
         )
 
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if os.path.exists(temp_audio_path):
