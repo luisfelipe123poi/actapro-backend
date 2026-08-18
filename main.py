@@ -496,40 +496,43 @@ async def webhook_mercadopago(request: Request):
 
 import ffmpeg
 
-# Función para validar la calidad técnica del audio
-function validarCalidadAudio(filePath) {
-    return new Promise((resolve, reject) => {
-        ffmpeg.ffprobe(filePath, (err, metadata) => {
-            if (err) {
-                return reject("No se pudo leer el archivo de audio. Puede estar corrupto.");
-            }
-
-            const format = metadata.format;
-            const bitRate = format.bit_rate; // Bits por segundo
-            const duration = format.duration; // Duración en segundos
-
-            // REGLA 1: Bitrate menor a 32 kbps (audio ultra comprimido o estática)
-            if (bitRate && bitRate < 32000) {
-                return resolve({
-                    valido: false,
-                    motivo: "AUDIO_MUY_COMPRIMIDO_O_DEFECTUOSO",
-                    mensaje: "El archivo presenta una calidad técnica deficiente (bitrate muy bajo). Esto impedirá una correcta identificación de oradores."
-                });
-            }
-
-            // REGLA 2: Audio demasiado corto (menos de 10 segundos para una asamblea)
-            if (duration && duration < 10) {
-                return resolve({
-                    valido: false,
-                    motivo: "AUDIO_DEMASIADO_CORTO",
-                    mensaje: "El archivo de audio es demasiado corto para ser una asamblea."
-                });
-            }
-
-            resolve({ valido: true });
-        });
-    });
-} 
+# Función para validar la calidad técnica del audio en Python
+def validar_calidad_audio(file_path: str):
+    try:
+        # ffmpeg.probe obtiene los metadatos del archivo
+        probe = ffmpeg.probe(file_path)
+        format_info = probe.get('format', {})
+        
+        bit_rate = format_info.get('bit_rate')
+        duration = format_info.get('duration')
+        
+        # REGLA 1: Bitrate menor a 32 kbps (audio ultra comprimido o estática)
+        if bit_rate is not None:
+            if int(bit_rate) < 32000:
+                return {
+                    "valido": False,
+                    "motivo": "AUDIO_MUY_COMPRIMIDO_O_DEFECTUOSO",
+                    "mensaje": "El archivo presenta una calidad técnica deficiente (bitrate muy bajo). Esto impedirá una correcta identificación de oradores."
+                }
+                
+        # REGLA 2: Audio demasiado corto (menos de 10 segundos para una asamblea)
+        if duration is not None:
+            if float(duration) < 10.0:
+                return {
+                    "valido": False,
+                    "motivo": "AUDIO_DEMASIADO_CORTO",
+                    "mensaje": "El archivo de audio es demasiado corto para ser una asamblea."
+                }
+                
+        return {"valido": True}
+        
+    except ffmpeg.Error:
+        # Ocurre si ffprobe no puede leer el archivo o está corrupto
+        return {
+            "valido": False,
+            "motivo": "ERROR_DE_LECTURA",
+            "mensaje": "No se pudo leer el archivo de audio. Puede estar corrupto."
+        }
 
 
 from pydub import AudioSegment
