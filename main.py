@@ -496,7 +496,7 @@ async def webhook_mercadopago(request: Request):
 
 import ffmpeg
 
-// Función para validar la calidad técnica del audio
+# Función para validar la calidad técnica del audio
 function validarCalidadAudio(filePath) {
     return new Promise((resolve, reject) => {
         ffmpeg.ffprobe(filePath, (err, metadata) => {
