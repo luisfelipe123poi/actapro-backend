@@ -494,8 +494,7 @@ async def webhook_mercadopago(request: Request):
 
   return {"status": "ok"}
 
-import ffmpeg from 'fluent-ffmpeg';
-import fs from 'fs';
+import ffmpeg
 
 // Función para validar la calidad técnica del audio
 function validarCalidadAudio(filePath) {
