@@ -204,10 +204,15 @@ def get_user_status(email: str):
             status_code=404, detail="Usuario no encontrado en la base de datos"
         )
 
+    # Definimos el límite según el plan si no estuviera guardado
+    limite = 1.0 if usuario.get("plan", "free") == "free" else 15.0
+
     return {
         "email": usuario.get("email"),
         "plan": usuario.get("plan", "free"),
-        "horas_restantes": usuario.get("horas_restantes", 0.0), # <--- SE MUESTRA AL CONSULTAR EL ESTADO
+        "horas_restantes": usuario.get("horas_restantes", 0.0),
+        "horas_usadas_mes": usuario.get("horas_usadas_mes", 0.0), # <--- ¡FALTABA ESTE CAMPO EN LA RESPUESTA!
+        "limite_horas_mes": usuario.get("limite_horas_mes", limite) # <--- Y ESTE PARA EL LÍMITE
     }
 
 
