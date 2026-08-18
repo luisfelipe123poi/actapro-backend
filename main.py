@@ -399,11 +399,12 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
 
   user = users_collection.find_one({"email": data.email})
   if not user:
+    # Si el usuario no existe, se crea con plan free y 1 hora mensual gratuita
     users_collection.insert_one({
         "email": data.email,
         "password": "temp_password_temporal",
         "plan": "free",
-        "tokens": 5,
+        "horas_usadas_mes": 0.0,
     })
 
   preference_data = {
@@ -608,10 +609,10 @@ async def procesar_asamblea(
 
         # 2. Validar límite de duración por archivo individual según el plan
         limites_por_archivo = {
-            "free": 15,          # Máximo 15 min por archivo
-            "basico": 90,        # Máximo 1.5 horas por archivo
-            "profesional": 240,  # Máximo 4 horas por archivo
-            "corporativo": 480   # Máximo 8 horas por archivo
+            "free": 30,          # Máximo 30 min por archivo
+            "basico": 180,        # Máximo 3 horas por archivo
+            "profesional": 300,  # Máximo 5 horas por archivo
+            "corporativo": 600   # Máximo 10 horas por archivo
         }
         limite_archivo_min = limites_por_archivo.get(plan_usuario, 15)
         
