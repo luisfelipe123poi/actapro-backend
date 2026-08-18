@@ -535,8 +535,6 @@ def validar_calidad_audio(file_path: str):
         }
 
 
-from pydub import AudioSegment
-
 @app.post("/procesar")
 async def procesar_asamblea(
     file: UploadFile = File(...),
@@ -570,48 +568,42 @@ async def procesar_asamblea(
         with open(temp_audio_path, "wb") as buffer:
             buffer.write(content_bytes)
 
-        # 1.1 Validar calidad técnica del audio usando fluent-ffmpeg
-        def validar_calidad_audio_ffprobe(filePath):
-            returnkaisi = "fluent-ffmpeg" # Referencia al módulo importado
-            return __import__("asyncio").get_event_loop().run_in_executor(
-                None, 
-                lambda: __import__("fluent-ffmpeg").ffprobe(filePath)
-            )
-
+        # 1.1 Validar calidad técnica y obtener duración exacta usando ffmpeg.probe
         try:
-            # Ejecución síncrona de ffprobe envuelta en un bloque seguro
-            metadata = await __import__("asyncio").to_thread(ffmpeg.ffprobe, temp_audio_path)
+            metadata = await __import__("asyncio").to_thread(ffmpeg.probe, temp_audio_path)
             format_data = metadata.get("format", {})
             bit_rate = format_data.get("bit_rate")
-            duration = format_data.get("duration")
+            duration_seconds = format_data.get("duration")
 
+            if not duration_seconds:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No se pudo leer la duración del archivo de audio."
+                )
+
+            duracion_segundos = float(duration_seconds)
+            duracion_minutos = duracion_segundos / 60.0
+
+            # REGLA CALIDAD 1: Bitrate menor a 32 kbps
             if bit_rate and float(bit_rate) < 32000:
                 raise HTTPException(
                     status_code=400,
                     detail="El archivo presenta una calidad técnica deficiente (bitrate muy bajo). Esto impedirá una correcta identificación de oradores."
                 )
 
-            if duration and float(duration) < 10:
+            # REGLA CALIDAD 2: Audio demasiado corto (menos de 10 segundos)
+            if duracion_segundos < 10:
                 raise HTTPException(
                     status_code=400,
                     detail="El archivo de audio es demasiado corto para ser una asamblea."
                 )
+
         except HTTPException as he:
             raise he
         except Exception as e:
             raise HTTPException(
                 status_code=400,
-                detail="No se pudo leer el archivo de audio. Puede estar corrupto o el formato no es compatible."
-            )
-
-        # Medir la duración exacta del audio en minutos
-        try:
-            audio_file = AudioSegment.from_file(temp_audio_path)
-            duracion_minutos = len(audio_file) / (1000 * 60)
-        except Exception as e:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"No se pudo leer la duración del audio. Asegúrate de que sea un formato válido (MP3, WAV, M4A). Detalle: {str(e)}"
+                detail=f"No se pudo leer el archivo de audio. Puede estar corrupto o el formato no es compatible. Detalle: {str(e)}"
             )
 
         # 2. Validar límite de duración por archivo individual según el plan
