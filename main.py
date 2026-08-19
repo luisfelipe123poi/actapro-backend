@@ -329,7 +329,7 @@ async def descargar_acta_pdf(acta_id: str, email: str):
             raise HTTPException(status_code=404, detail="Acta no encontrada.")
             
         contenido_texto = acta.get("contenido", "")
-        nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", "").replace(".pdf", "") + ".pdf"
+        nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", "").replace(".pdf", "").strip() + ".pdf"
         
         # Configuración del PDF en memoria usando ReportLab Platypus
         pdf_buffer = io.BytesIO()
@@ -392,7 +392,7 @@ async def descargar_acta_pdf(acta_id: str, email: str):
         story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
         story.append(Spacer(1, 10))
         
-        # Procesar el contenido línea por línea (Corregido: lineas)
+        # Procesar el contenido línea por línea
         lineas = contenido_texto.split('\n')
         for linea in lineas:
             linea_original = linea.strip()
@@ -432,7 +432,7 @@ async def descargar_acta_pdf(acta_id: str, email: str):
         return Response(
             content=pdf_buffer.getvalue(),
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+            headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
         )
         
     except HTTPException as he:
