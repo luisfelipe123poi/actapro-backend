@@ -1225,3 +1225,8 @@ async def eliminar_scanner(data: EliminarScannerRequest):
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/actas/historial")
+async def obtener_historial_actas(email: str):
+    actas = list(actas_collection.find({"email": email}, {"_id": 0}))
+    return {"actas": actas}
