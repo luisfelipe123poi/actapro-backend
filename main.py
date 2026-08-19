@@ -1256,3 +1256,88 @@ async def descargar_scanner(scanner_id: str, email: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/scanners/descargar-pdf/{scanner_id}")
+async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
+    try:
+        filtro = {"_id": ObjectId(scanner_id), "email": email}
+        registro = scanners_historial_collection.find_one(filtro)
+        
+        if not registro:
+            registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
+            
+        if not registro:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+
+        nombre_base = registro.get("nombre", "Escaneo_IA").replace(".pdf", "").replace(".jpg", "").replace(".png", "")
+        nombre_archivo_pdf = f"{nombre_base}.pdf"
+        contenido_html = registro.get("contenido", "")
+
+        # Limpiar etiquetas HTML básicas para adaptarlas a los párrafos de ReportLab
+        # Convertimos <h1>, <h2> en títulos y <p>, <br> en saltos
+        texto_limpio = contenido_html
+        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<b>\1</b><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><b>\1</b><br/>', texto_limpio, flags=re.IGNORECASE)
+        texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
+        
+        # Eliminar cualquier etiqueta HTML sobrante que quede suelta
+        texto_limpio = re.sub(r'<[^>]+>', '', texto_limpio)
+        # Limpiar entidades HTML comunes
+        texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+
+        # Configuración del PDF en memoria usando ReportLab
+        pdf_buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            pdf_buffer, 
+            pagesize=letter,
+            rightMargin=54,
+            leftMargin=54,
+            topMargin=54,
+            bottomMargin=54
+        )
+        
+        story = []
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            'ScannerTitle',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            leading=15,
+            alignment=TA_LEFT,
+            spaceAfter=12
+        )
+        
+        body_style = ParagraphStyle(
+            'ScannerBody',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=9.5,
+            leading=13.5,
+            alignment=TA_JUSTIFY,
+            spaceAfter=6
+        )
+
+        story.append(Paragraph(f"DOCUMENTO ESCANEADO: {registro.get('nombre', '')}", title_style))
+        story.append(Spacer(1, 8))
+
+        lineas = texto_limpio.split('\n')
+        for linea in lineas:
+            if linea.strip():
+                story.append(Paragraph(linea.strip(), body_style))
+            else:
+                story.append(Spacer(1, 4))
+
+        doc.build(story)
+        pdf_buffer.seek(0)
+        
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
+
