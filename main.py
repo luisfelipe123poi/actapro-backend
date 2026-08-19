@@ -1117,7 +1117,9 @@ async def descargar_acta_pdf(acta_id: str, email: str):
         headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
     )
 
+from datetime import datetime
 from bson import ObjectId
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 # ================= MODELOS PYDANTIC PARA SCANNERS =================
@@ -1140,7 +1142,7 @@ class EliminarScannerRequest(BaseModel):
 # ================= ENDPOINTS DE SCANNERS =================
 
 @app.get("/api/scanners/historial")
-def obtener_historial_scanners(email: str):
+async def obtener_historial_scanners(email: str):
     scanners_cursor = scanners_historial_collection.find({"email": email})
     scanners = []
     for doc in scanners_cursor:
@@ -1174,19 +1176,17 @@ async def guardar_escaneo(data: GuardarScannerRequest):
 @app.put("/api/scanners/renombrar")
 async def renombrar_scanner(data: RenombrarScannerRequest):
     try:
+        # Intentar buscar primero por ObjectId si es un ID válido de Mongo, o por campo nombre
+        filtro = {"email": data.email}
+        try:
+            filtro["$or"] = [{"_id": ObjectId(data.scanner_id)}, {"nombre": data.scanner_id}]
+        except Exception:
+            filtro["nombre"] = data.scanner_id
+
         resultado = scanners_historial_collection.update_one(
-            {"email": data.email, "nombre": data.scanner_id},
+            filtro,
             {"$set": {"nombre": data.nuevo_nombre}},
         )
-
-        if resultado.matched_count == 0:
-            try:
-                resultado = scanners_historial_collection.update_one(
-                    {"_id": ObjectId(data.scanner_id), "email": data.email},
-                    {"$set": {"nombre": data.nuevo_nombre}},
-                )
-            except Exception:
-                pass
 
         if resultado.matched_count == 0:
             raise HTTPException(
@@ -1203,17 +1203,13 @@ async def renombrar_scanner(data: RenombrarScannerRequest):
 @app.delete("/api/scanners/eliminar")
 async def eliminar_scanner(data: EliminarScannerRequest):
     try:
-        resultado = scanners_historial_collection.delete_one(
-            {"email": data.email, "nombre": data.scanner_id}
-        )
+        filtro = {"email": data.email}
+        try:
+            filtro["$or"] = [{"_id": ObjectId(data.scanner_id)}, {"nombre": data.scanner_id}]
+        except Exception:
+            filtro["nombre"] = data.scanner_id
 
-        if resultado.deleted_count == 0:
-            try:
-                resultado = scanners_historial_collection.delete_one(
-                    {"_id": ObjectId(data.scanner_id), "email": data.email}
-                )
-            except Exception:
-                pass
+        resultado = scanners_historial_collection.delete_one(filtro)
 
         if resultado.deleted_count == 0:
             raise HTTPException(
@@ -1226,35 +1222,10 @@ async def eliminar_scanner(data: EliminarScannerRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ================= ENDPOINTS DE ACTAS (REFERENCIA) =================
+
 @app.get("/api/actas/historial")
 async def obtener_historial_actas(email: str):
     actas = list(actas_collection.find({"email": email}, {"_id": 0}))
     return {"actas": actas}
-
-from bson import ObjectId
-
-@app.put("/api/scanners/renombrar")
-async def renombrar_scanner(data: dict):
-    email = data.get("email")
-    scanner_id = data.get("scanner_id")
-    nuevo_nombre = data.get("nuevo_nombre")
-    
-    result = scanners_historial_collection.update_one(
-        {"_id": ObjectId(scanner_id), "email": email},
-        {"$set": {"nombre": nuevo_nombre}}
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Escaneo no encontrado")
-    return {"message": "Escaneo renombrado con éxito"}
-
-@app.delete("/api/scanners/eliminar")
-async def eliminar_scanner(data: dict):
-    email = data.get("email")
-    scanner_id = data.get("scanner_id")
-    
-    result = scanners_historial_collection.delete_one(
-        {"_id": ObjectId(scanner_id), "email": email}
-    )
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Escaneo no encontrado")
-    return {"message": "Escaneo eliminado correctamente"}
