@@ -161,7 +161,7 @@ class EliminarActaRequest(BaseModel):
 
 # Estructura maestra de configuración
 CONFIGURACION_PLANES = {
-    "free": {"tokens": 100, "horas": 3.0},
+    "free": {"tokens": 10000, "horas": 3.0},
     "basico": {"tokens": 100000, "horas": 15.0},
     "profesional": {"tokens": 300000, "horas": 60.0},
     "corporativo": {"tokens": 1000000, "horas": 200.0}
