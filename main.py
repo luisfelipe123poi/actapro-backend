@@ -1313,39 +1313,38 @@ import re
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     try:
-        filtro = {"_id": ObjectId(scanner_id), "email": email}
-        registro = scanners_historial_collection.find_one(filtro)
-        
+        # Buscar el registro de forma segura por ObjectId o por Nombre
+        registro = None
+        try:
+            registro = scanners_historial_collection.find_one({"_id": ObjectId(scanner_id), "email": email})
+        except Exception:
+            pass
+            
         if not registro:
             registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
             
         if not registro:
-            raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+            raise HTTPException(status_code=404, detail="Archivo no encontrado en el historial.")
 
-        nombre_base = registro.get("nombre", "Escaneo_IA").replace(".pdf", "").replace(".jpg", "").replace(".png", "")
+        nombre_base = str(registro.get("nombre", "Escaneo_IA")).replace(".pdf", "").replace(".jpg", "").replace(".png", "")
         nombre_archivo_pdf = f"{nombre_base}.pdf"
-        contenido_html = registro.get("contenido", "")
+        contenido_html = str(registro.get("contenido", ""))
 
-        # 1. Transformación avanzada para preservar y destacar títulos, subtítulos y negritas
+        # 1. Transformación segura de etiquetas HTML a estilos de ReportLab
         texto_limpio = contenido_html
         
-        # Títulos principales (h1) con mayor protagonismo y espaciado
-        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><font size="14"><b>\1</b></font><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        try:
+            texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><font size="14"><b>\1</b></font><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+            texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><font size="11"><b>\1</b></font><br/>', texto_limpio, flags=re.IGNORECASE)
+            texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
+            texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
+            texto_limpio = re.sub(r'<(b|strong)[^>]*>(.*?)</\1>', r'<b>\2</b>', texto_limpio, flags=re.IGNORECASE)
+            texto_limpio = re.sub(r'<(?!\/?(b|font)\b)[^>]+>', '', texto_limpio)
+        except Exception:
+            # Fallback seguro si la limpieza HTML falla
+            pass
         
-        # Subtítulos y secciones (h2) con distinción visual clara
-        texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><font size="11"><b>\1</b></font><br/>', texto_limpio, flags=re.IGNORECASE)
-        
-        # Párrafos limpios con su respectivo espaciado
-        texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
-        texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
-        
-        # Conservar y asegurar etiquetas de negrita (b, strong)
-        texto_limpio = re.sub(r'<(b|strong)[^>]*>(.*?)</\1>', r'<b>\2</b>', texto_limpio, flags=re.IGNORECASE)
-        
-        # Eliminar cualquier otra etiqueta HTML remanente conservando el texto interno
-        texto_limpio = re.sub(r'<(?!\/?(b|font)\b)[^>]+>', '', texto_limpio)
-        
-        # Limpiar entidades HTML comunes
+        # Limpieza de entidades HTML
         texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
         # Configuración del PDF en memoria usando ReportLab
@@ -1362,7 +1361,6 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         story = []
         styles = getSampleStyleSheet()
         
-        # Estilo principal del cuerpo con excelente legibilidad
         body_style = ParagraphStyle(
             'ScannerBody',
             parent=styles['Normal'],
@@ -1373,12 +1371,11 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
             spaceAfter=8
         )
 
-        # Se eliminó la línea de "DOCUMENTO ESCANEADO:" por solicitud
-
         lineas = texto_limpio.split('\n')
         for linea in lineas:
-            if linea.strip():
-                story.append(Paragraph(linea.strip(), body_style))
+            linea_str = str(linea).strip()
+            if linea_str:
+                story.append(Paragraph(linea_str, body_style))
             else:
                 story.append(Spacer(1, 4))
 
@@ -1390,5 +1387,8 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
             media_type="application/pdf",
             headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
         )
+    except HTTPException as he:
+        raise he
     except Exception as e:
+        print(f"Error crítico en PDF Scanner: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
