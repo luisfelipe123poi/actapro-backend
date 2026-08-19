@@ -922,7 +922,7 @@ async def escanear_documento(
             contenido_usuario = [
                 {
                     "type": "text",
-                    "text": "Analiza este documento o imagen escaneada. Extrae la información estructurando el diseño visual con etiquetas HTML semánticas corporativas (usa <h1>, <h2>, <p>, <table>, <thead>, <tbody>, <tr>, <th>, <td>). Aplica clases de Tailwind CSS para mantener un estilo profesional (ej. fuentes, bordes limpios, espaciados). NO uses Markdown, NO uses asteriscos, NO uses bloques de código de ningún tipo. Si hay tablas de datos, créalas completamente con etiquetas HTML. Si detectas gráficos estadísticos o diagramas, represetalos con un div estructurado con la clase 'p-4 border-2 border-dashed border-slate-300 bg-slate-50 text-center text-slate-500 rounded-lg text-xs my-4' indicando el contenido del gráfico."
+                    "text": "Analyze this scanned document or image. Extract the information by structuring the visual design with corporate semantic HTML tags (use <h1>, <h2>, <p>, <table>, <thead>, <tbody>, <tr>, <th>, <td>). Apply Tailwind CSS classes to maintain a professional style (e.g., fonts, clean borders, spacing). DO NOT use Markdown, DO NOT use asterisks, DO NOT use code blocks of any kind. If there are data tables, create them completely with HTML tags. If you detect statistical charts or diagrams, represent them with a structured div with the class 'p-4 border-2 border-dashed border-slate-300 bg-slate-50 text-center text-slate-500 rounded-lg text-xs my-4' indicating the content of the chart."
                 },
                 {
                     "type": "image_url",
@@ -959,15 +959,15 @@ async def escanear_documento(
             if not texto_extraido.strip():
                 raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
 
-            contenido_usuario = f"""Analiza el siguiente texto extraído del documento. Tu salida debe ser EXCLUSIVAMENTE HTML semántico corporativo listo para renderizar directamente en un navegador o contenedor web.
-- Replica la estructura visual y de secciones originales.
-- Usa <h1>, <h2> para títulos principales y de sección.
-- Usa <p> para párrafos con clases de Tailwind (ej. text-slate-900, text-xs, leading-relaxed).
-- Usa etiquetas de tabla completas (<table>, <thead>, <tbody>, <tr>, <td>) con bordes y clases corporativas si hay datos estructurados.
-- Si detectas referencias a gráficos, esquemas o diagramas, créalos como un bloque visual con borde punteado.
-- PROHIBIDO usar Markdown, asteriscos (*), guiones de lista markdown (#) o envolver el resultado en comillas de código markdown.
+            contenido_usuario = f"""Analyze the following text extracted from the document. Your output must be EXCLUSIVELY corporate semantic HTML ready to render directly in a browser or web container.
+- Replicate the original visual and section structure.
+- Use <h1>, <h2> for main and section titles.
+- Use <p> for paragraphs with Tailwind classes (e.g., text-slate-900, text-xs, leading-relaxed).
+- Use complete table tags (<table>, <thead>, <tbody>, <tr>, <td>) with borders and corporate classes if there is structured data.
+- If you detect references to charts, schemes, or diagrams, create them as a visual block with a dotted border.
+- FORBIDDEN to use Markdown, asterisks (*), markdown list hyphens (#), or wrap the result in markdown code quotes.
 
-Texto extraído:
+Extracted text:
 {texto_extraido[:15000]}"""
 
         # 3. Procesamiento inteligente y estructurado con OpenAI GPT-4o
@@ -976,14 +976,14 @@ Texto extraído:
             messages=[
                 {
                     "role": "system",
-                    "content": """Eres un Ingeniero de Documentación y Diseñador Web experto en digitalización corporativa. 
-Tu única misión es transformar la información del documento de entrada en un bloque de código HTML puro, limpio y profesional integrado con clases de Tailwind CSS.
-REGLAS ESTRICTAS:
-1. Devuelve SOLAMENTE código HTML válido. No incluyas explicaciones previas ni texto fuera del HTML.
-2. NUNCA utilices sintaxis Markdown (*, #, -, ```html). El resultado debe ser texto plano que contenga exclusivamente el marcado HTML.
-3. Estructura tablas de datos con <table>, <thead>, <tbody>, <tr>, <th> y <td> aplicando clases limpias (ej. border border-slate-300 p-2).
-4. Representa gráficos detectados mediante un contenedor <div> con bordes punteados y diseño profesional.
-5. Mantén absoluta fidelidad a la estructura original del documento."""
+                    "content": """You are a Documentation Engineer and Web Designer expert in corporate digitalization. 
+Your sole mission is to transform the input document information into a pure, clean, and professional HTML code block integrated with Tailwind CSS classes.
+STRICT RULES:
+1. Return ONLY valid HTML code. Do not include prior explanations or text outside of the HTML.
+2. NEVER use Markdown syntax (*, #, -, ```html). The result must be plain text containing exclusively HTML markup.
+3. Structure data tables with <table>, <thead>, <tbody>, <tr>, <th>, and <td> applying clean classes (e.g., border border-slate-300 p-2).
+4. Represent detected charts using a <div> container with dotted borders and professional design.
+5. Maintain absolute fidelity to the original document structure."""
                 },
                 {
                     "role": "user",
@@ -996,6 +996,7 @@ REGLAS ESTRICTAS:
         resultado_html = response_openai.choices[0].message.content.strip()
 
         # Descontar / sumar tokens consumidos en la BD si el usuario está autenticado
+        tokens_consumidos = 0
         if email and hasattr(response_openai, "usage") and response_openai.usage:
             tokens_consumidos = response_openai.usage.total_tokens
             users_collection.update_one(
@@ -1012,10 +1013,24 @@ REGLAS ESTRICTAS:
             resultado_html = resultado_html[:-3]
         resultado_html = resultado_html.strip()
 
+        # Guardar automáticamente en la colección de scanners si hay email
+        scanner_id = None
+        if email:
+            nuevo_registro = {
+                "email": email,
+                "nombre": file.filename or "Documento Escaneado",
+                "fecha": datetime.datetime.utcnow().isoformat(),
+                "tokens": tokens_consumidos,
+                "contenido": resultado_html
+            }
+            resultado_db = scanners_historial_collection.insert_one(nuevo_registro)
+            scanner_id = str(resultado_db.inserted_id)
+
         # 4. Retornar el HTML estructurado al Frontend
         return {
             "status": "success",
-            "transcripcion": resultado_html
+            "transcripcion": resultado_html,
+            "id": scanner_id
         }
 
     except HTTPException as he:
