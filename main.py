@@ -1326,16 +1326,25 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = registro.get("contenido", "")
 
-        # Limpiar etiquetas HTML básicas para adaptarlas a los párrafos de ReportLab
-        # Convertimos <h1>, <h2> en títulos y <p>, <br> en saltos
+        # 1. Transformación avanzada para preservar y destacar títulos, subtítulos y negritas
         texto_limpio = contenido_html
-        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<b>\1</b><br/><br/>', texto_limpio, flags=re.IGNORECASE)
-        texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><b>\1</b><br/>', texto_limpio, flags=re.IGNORECASE)
+        
+        # Títulos principales (h1) con mayor protagonismo y espaciado
+        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><font size="14"><b>\1</b></font><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        
+        # Subtítulos y secciones (h2) con distinción visual clara
+        texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><font size="11"><b>\1</b></font><br/>', texto_limpio, flags=re.IGNORECASE)
+        
+        # Párrafos limpios con su respectivo espaciado
         texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
         texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
         
-        # Eliminar cualquier etiqueta HTML sobrante que quede suelta
-        texto_limpio = re.sub(r'<[^>]+>', '', texto_limpio)
+        # Conservar y asegurar etiquetas de negrita (b, strong)
+        texto_limpio = re.sub(r'<(b|strong)[^>]*>(.*?)</\1>', r'<b>\2</b>', texto_limpio, flags=re.IGNORECASE)
+        
+        # Eliminar cualquier otra etiqueta HTML remanente conservando el texto interno
+        texto_limpio = re.sub(r'<(?!\/?(b|font)\b)[^>]+>', '', texto_limpio)
+        
         # Limpiar entidades HTML comunes
         texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
@@ -1353,28 +1362,18 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         story = []
         styles = getSampleStyleSheet()
         
-        title_style = ParagraphStyle(
-            'ScannerTitle',
-            parent=styles['Heading1'],
-            fontName='Helvetica-Bold',
-            fontSize=12,
-            leading=15,
-            alignment=TA_LEFT,
-            spaceAfter=12
-        )
-        
+        # Estilo principal del cuerpo con excelente legibilidad
         body_style = ParagraphStyle(
             'ScannerBody',
             parent=styles['Normal'],
             fontName='Helvetica',
-            fontSize=9.5,
-            leading=13.5,
+            fontSize=10,
+            leading=14.5,
             alignment=TA_JUSTIFY,
-            spaceAfter=6
+            spaceAfter=8
         )
 
-        
-        story.append(Spacer(1, 8))
+        # Se eliminó la línea de "DOCUMENTO ESCANEADO:" por solicitud
 
         lineas = texto_limpio.split('\n')
         for linea in lineas:
