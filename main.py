@@ -1308,46 +1308,58 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
+from bson import ObjectId
+import io
 import re
 
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     try:
-        # Buscar el registro de forma segura por ObjectId o por Nombre
         registro = None
-        try:
-            registro = scanners_historial_collection.find_one({"_id": ObjectId(scanner_id), "email": email})
-        except Exception:
-            pass
-            
+        
+        # 1. Intentar buscar por ID de manera segura (si el ID es válido)
+        if scanner_id and len(scanner_id) == 24:
+            try:
+                registro = scanners_historial_collection.find_one({"_id": ObjectId(scanner_id), "email": email})
+            except Exception:
+                pass
+                
+        # 2. Si no se encontró por ID, buscar directamente por el nombre o coincidencia exacta
         if not registro:
             registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
             
+        # 3. Búsqueda flexible por texto parcial en el nombre si aún no aparece
         if not registro:
-            raise HTTPException(status_code=404, detail="Archivo no encontrado en el historial.")
+            registro = scanners_historial_collection.find_one({"email": email, "nombre": {"$regex": re.escape(scanner_id), "$options": "i"}})
+            
+        if not registro:
+            raise HTTPException(status_code=404, detail="El documento escaneado no fue encontrado en el historial.")
 
         nombre_base = str(registro.get("nombre", "Escaneo_IA")).replace(".pdf", "").replace(".jpg", "").replace(".png", "")
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = str(registro.get("contenido", ""))
 
-        # 1. Transformación segura de etiquetas HTML a estilos de ReportLab
+        # 4. Transformación de etiquetas HTML para ReportLab (Títulos, Subtítulos, Negritas)
         texto_limpio = contenido_html
-        
         try:
-            texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><font size="14"><b>\1</b></font><br/><br/>', texto_limpio, flags=re.IGNORECASE)
-            texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><font size="11"><b>\1</b></font><br/>', texto_limpio, flags=re.IGNORECASE)
+            # Reemplazar h1 por títulos grandes en negrita
+            texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><font size="13" color="#111111"><b>\1</b></font><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+            # Reemplazar h2 por subtítulos destacados
+            texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><font size="11" color="#222222"><b>\1</b></font><br/>', texto_limpio, flags=re.IGNORECASE)
+            # Manejo de párrafos y saltos
             texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
             texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
+            # Asegurar etiquetas de negrita
             texto_limpio = re.sub(r'<(b|strong)[^>]*>(.*?)</\1>', r'<b>\2</b>', texto_limpio, flags=re.IGNORECASE)
+            # Limpiar etiquetas no soportadas manteniendo contenido interno
             texto_limpio = re.sub(r'<(?!\/?(b|font)\b)[^>]+>', '', texto_limpio)
         except Exception:
-            # Fallback seguro si la limpieza HTML falla
             pass
         
-        # Limpieza de entidades HTML
-        texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        # Limpiar entidades HTML básicas
+        texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
 
-        # Configuración del PDF en memoria usando ReportLab
+        # 5. Generación del PDF con ReportLab
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_buffer, 
@@ -1390,5 +1402,5 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     except HTTPException as he:
         raise he
     except Exception as e:
-        print(f"Error crítico en PDF Scanner: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
+        print(f"Error crítico generando PDF de escaneo: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno generando PDF: {str(e)}")
