@@ -623,7 +623,7 @@ async def procesar_asamblea(
         # 3. Validar límite de horas acumuladas en el mes
         horas_usadas_mes = user.get("horas_usadas_mes", 0.0)
         limites_mensuales = {
-            "free": 1.0,
+            "free": 3.0,
             "basico": 15.0,
             "profesional": 60.0,
             "corporativo": 200.0
