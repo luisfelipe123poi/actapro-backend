@@ -1304,12 +1304,14 @@ class NumberedCanvas(canvas.Canvas):
 
 
 from fastapi.responses import Response
+from fastapi import HTTPException
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
 import re
-import io # Asegúrate de importar io si no lo tenías
+import io
+from bson import ObjectId
 
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
@@ -1327,7 +1329,7 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = registro.get("contenido", "")
 
-        # Configuración del PDF en memoria usando ReportLab
+        # Configuración del PDF en memoria usando ReportLab con metadatos corregidos
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_buffer, 
@@ -1335,101 +1337,75 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
             rightMargin=54,
             leftMargin=54,
             topMargin=54,
-            bottomMargin=54
+            bottomMargin=54,
+            title=nombre_base,
+            author="Sistema de Escaneo IA"
         )
         
         story = []
         styles = getSampleStyleSheet()
         
-        # Estilos personalizados para títulos, subtítulos y cuerpo
-        title_style = ParagraphStyle(
-            'ScannerTitle',
-            parent=styles['Heading1'],
-            fontName='Helvetica-Bold',
-            fontSize=12,
-            leading=15,
-            alignment=TA_LEFT,
-            spaceAfter=12
-        )
-
+        # Estilos personalizados
         h1_style = ParagraphStyle(
             'ScannerH1',
             parent=styles['Heading2'],
             fontName='Helvetica-Bold',
-            fontSize=11,
-            leading=14,
+            fontSize=14,
+            leading=18,
             alignment=TA_LEFT,
-            spaceBefore=10,
-            spaceAfter=6
+            spaceBefore=12,
+            spaceAfter=8
         )
 
         h2_style = ParagraphStyle(
             'ScannerH2',
             parent=styles['Heading3'],
             fontName='Helvetica-Bold',
-            fontSize=10,
-            leading=13,
+            fontSize=12,
+            leading=15,
             alignment=TA_LEFT,
-            spaceBefore=8,
-            spaceAfter=4
+            spaceBefore=10,
+            spaceAfter=6
         )
         
         body_style = ParagraphStyle(
             'ScannerBody',
             parent=styles['Normal'],
             fontName='Helvetica',
-            fontSize=9.5,
-            leading=13.5,
+            fontSize=10,
+            leading=14,
             alignment=TA_JUSTIFY,
             spaceAfter=6
         )
 
-        # Título principal del documento
-        story.append(Paragraph(f"DOCUMENTO ESCANEADO: {registro.get('nombre', '')}", title_style))
-        story.append(Spacer(1, 8))
-
-        # Procesamiento inteligente de etiquetas HTML para ReportLab
-        # 1. Convertir h1 en bloques separados con estilo propio
+        # Procesamiento de etiquetas HTML
         contenido_procesado = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<h1_tag>\1</h1_tag>', contenido_html, flags=re.IGNORECASE | re.DOTALL)
-        # 2. Convertir h2 en bloques separados con estilo propio
         contenido_procesado = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<h2_tag>\1</h2_tag>', contenido_procesado, flags=re.IGNORECASE | re.DOTALL)
-        # 3. Normalizar etiquetas de párrafo y saltos
         contenido_procesado = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', contenido_procesado, flags=re.IGNORECASE | re.DOTALL)
         contenido_procesado = re.sub(r'<br\s*/?>', r'<br/>', contenido_procesado, flags=re.IGNORECASE)
-        
-        # 4. Limpiar otras etiquetas HTML no permitidas por ReportLab, EXCEPTO las de negrita (<b>, <strong>) y nuestras marcas temporales
-        # Primero reemplazamos strong por b para que ReportLab las reconozca uniformemente
         contenido_procesado = re.sub(r'<(?:strong)[^>]*>(.*?)</(?:strong)>', r'<b>\1</b>', contenido_procesado, flags=re.IGNORECASE | re.DOTALL)
         
-        # Eliminamos cualquier otra etiqueta HTML no deseada que no sea <b>, </b>, <h1_tag>, </h1_tag>, <h2_tag>, </h2_tag>, <br/>
-        # Una forma limpia es dividir por líneas o parsear los bloques personalizados
         lineas = contenido_procesado.split('\n')
         
         for linea in lineas:
             linea_str = linea.strip()
             if not linea_str:
-                story.append(Spacer(1, 4))
                 continue
                 
-            # Verificar si la línea es un título h1 detectado
+            # Verificar h1
             h1_match = re.search(r'<h1_tag>(.*?)</h1_tag>', linea_str, flags=re.DOTALL)
             if h1_match:
-                texto_h1 = re.sub(r'<[^>]+>', '', h1_match.group(1)) # Limpiar tags internos si los hubiera
-                story.append(Paragraph(texto_h1, h1_style))
+                story.append(Paragraph(h1_match.group(1), h1_style))
                 continue
                 
-            # Verificar si la línea es un subtítulo h2 detectado
+            # Verificar h2
             h2_match = re.search(r'<h2_tag>(.*?)</h2_tag>', linea_str, flags=re.DOTALL)
             if h2_match:
-                texto_h2 = re.sub(r'<[^>]+>', '', h2_match.group(1))
-                story.append(Paragraph(texto_h2, h2_style))
+                story.append(Paragraph(h2_match.group(1), h2_style))
                 continue
                 
-            # Limpiar etiquetas HTML extrañas en párrafos normales, PERO conservando las etiquetas <b> y <br/> permitidas
-            # (Reemplazamos cualquier etiqueta que NO sea b o br)
+            # Limpiar etiquetas no permitidas en párrafos normales
             linea_limpia = re.sub(r'<(?!/?b\b)(?!/?br\b)[^>]+>', '', linea_str)
-            
-            # Limpiar entidades HTML comunes
             linea_limpia = linea_limpia.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
             
             if linea_limpia.strip():
