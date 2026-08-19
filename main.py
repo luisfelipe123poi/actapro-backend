@@ -1257,6 +1257,52 @@ async def descargar_scanner(scanner_id: str, email: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+import re
+import io
+
+class NumberedCanvas(canvas.Canvas):
+    """ Canvas personalizado para agregar pie de página profesional con numeración """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pages = []
+
+    def showPage(self):
+        self.pages.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self.pages)
+        for page in self.pages:
+            self.__dict__.update(page)
+            self.draw_footer(num_pages)
+            super().showPage()
+        super().save()
+
+    def draw_footer(self, total_pages):
+        self.saveState()
+        self.setFont("Helvetica", 8)
+        self.setFillColor(colors.HexColor("#64748B"))
+        
+        # Línea divisoria sutil en el pie de página
+        self.setStrokeColor(colors.HexColor("#CBD5E1"))
+        self.setLineWidth(0.5)
+        self.line(54, 40, letter[0] - 54, 40)
+        
+        # Texto del pie
+        footer_text = f"Generado mediante ActasPro AI • Página {self._pageNumber} de {total_pages}"
+        self.drawRightString(letter[0] - 54, 25, footer_text)
+        
+        # Sello corporativo o fecha en la esquina inferior izquierda
+        self.drawString(54, 25, "Documento Digital Verificado")
+        self.restoreState()
+
+
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     try:
@@ -1269,29 +1315,36 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         if not registro:
             raise HTTPException(status_code=404, detail="Archivo no encontrado.")
 
-        nombre_base = registro.get("nombre", "Escaneo_IA").replace(".pdf", "").replace(".jpg", "").replace(".png", "")
+        nombre_base = registro.get("nombre", "Documento_Ejecutivo").replace(".pdf", "").replace(".jpg", "").replace(".png", "").replace(".docx", "")
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = registro.get("contenido", "")
 
-        # Limpiar etiquetas HTML básicas para adaptarlas a los párrafos de ReportLab
-        # Convertimos <h1>, <h2> en títulos y <p>, <br> en saltos
-        texto_limpio = contenido_html
-        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<b>\1</b><br/><br/>', texto_limpio, flags=re.IGNORECASE)
-        texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><b>\1</b><br/>', texto_limpio, flags=re.IGNORECASE)
-        texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
-        texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
+        # 1. PROCESAMIENTO AVANZADO Y LIMPIEZA DE ETIQUETAS HTML
+        texto_procesado = contenido_html
         
-        # Eliminar cualquier etiqueta HTML sobrante que quede suelta
-        texto_limpio = re.sub(r'<[^>]+>', '', texto_limpio)
-        # Limpiar entidades HTML comunes
-        texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        # Transformar títulos y subtítulos HTML a marcas de negrita estructuradas
+        texto_procesado = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><b>H1_TITLE: \1</b><br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
+        texto_procesado = re.sub(r'<h[2-6][^>]*>(.*?)</h[2-6]>', r'<br/><b>H2_TITLE: \1</b><br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
+        
+        # Párrafos y saltos
+        texto_procesado = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
+        texto_procesado = re.sub(r'<br\s*/?>', r'<br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
+        
+        # Formatos de negrita
+        texto_procesado = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', texto_procesado)
+        texto_procesado = re.sub(r'<strong>(.*?)</strong>', r'<b>\1</b>', texto_procesado, flags=re.IGNORECASE)
+        texto_procesado = re.sub(r'<b>(.*?)</b>', r'<b>\1</b>', texto_procesado, flags=re.IGNORECASE)
 
-        # Configuración del PDF en memoria usando ReportLab
+        # Limpiar etiquetas HTML no soportadas pero conservar <b> y <br/>
+        texto_procesado = re.sub(r'<(?!/?b\b|/?br\b)[^>]+>', '', texto_procesado)
+        texto_procesado = texto_procesado.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+
+        # 2. CONFIGURACIÓN DEL DOCUMENTO PDF (Márgenes ejecutivos)
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_buffer, 
             pagesize=letter,
-            rightMargin=54,
+            rightMargin=54,  # 0.75 pulgada
             leftMargin=54,
             topMargin=54,
             bottomMargin=54
@@ -1300,37 +1353,91 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         story = []
         styles = getSampleStyleSheet()
         
-        title_style = ParagraphStyle(
-            'ScannerTitle',
-            parent=styles['Heading1'],
+        # Estilos tipográficos profesionales
+        doc_header_style = ParagraphStyle(
+            'DocHeader',
+            parent=styles['Normal'],
             fontName='Helvetica-Bold',
-            fontSize=12,
-            leading=15,
-            alignment=TA_LEFT,
-            spaceAfter=12
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor("#4F46E5"),
+            spaceAfter=4
         )
         
-        body_style = ParagraphStyle(
-            'ScannerBody',
-            parent=styles['Normal'],
-            fontName='Helvetica',
-            fontSize=9.5,
-            leading=13.5,
-            alignment=TA_JUSTIFY,
+        title_main_style = ParagraphStyle(
+            'MainTitle',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=16,
+            leading=20,
+            textColor=colors.HexColor("#0F172A"),
+            spaceAfter=15,
+            alignment=TA_LEFT
+        )
+
+        h1_style = ParagraphStyle(
+            'SectionH1',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            leading=16,
+            textColor=colors.HexColor("#1E293B"),
+            spaceBefore=12,
             spaceAfter=6
         )
 
-        story.append(Paragraph(f"DOCUMENTO ESCANEADO: {registro.get('nombre', '')}", title_style))
-        story.append(Spacer(1, 8))
+        h2_style = ParagraphStyle(
+            'SectionH2',
+            parent=styles['Heading3'],
+            fontName='Helvetica-Bold',
+            fontSize=10.5,
+            leading=14,
+            textColor=colors.HexColor("#334155"),
+            spaceBefore=10,
+            spaceAfter=4
+        )
+        
+        body_style = ParagraphStyle(
+            'ExecutiveBody',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            leading=15,
+            textColor=colors.HexColor("#334155"),
+            alignment=TA_JUSTIFY,
+            spaceAfter=8
+        )
 
-        lineas = texto_limpio.split('\n')
+        # Encabezado visual dentro de la primera página
+        story.append(Paragraph("REPORTE OFICIAL / DIGITALIZACIÓN EJECUTIVA", doc_header_style))
+        story.append(Paragraph(registro.get('nombre', 'Documento Escaneado').upper(), title_main_style))
+        story.append(Spacer(1, 5))
+        
+        # Línea decorativa superior
+        # (Podemos simular un divisor limpio con una tabla o espacio)
+        story.append(Spacer(1, 10))
+
+        # 3. CONSTRUCCIÓN INTELIGENTE DEL CONTENIDO LÍNEA POR LÍNEA
+        lineas = texto_procesado.split('\n')
         for linea in lineas:
-            if linea.strip():
-                story.append(Paragraph(linea.strip(), body_style))
-            else:
+            linea_limpia = linea.strip()
+            if not linea_limpia:
                 story.append(Spacer(1, 4))
+                continue
 
-        doc.build(story)
+            if "H1_TITLE: " in linea_limpia:
+                texto_h1 = linea_limpia.replace("H1_TITLE: ", "").replace("<b>", "").replace("</b>", "")
+                story.append(Spacer(1, 8))
+                story.append(Paragraph(texto_h1, h1_style))
+            elif "H2_TITLE: " in linea_limpia:
+                texto_h2 = linea_limpia.replace("H2_TITLE: ", "").replace("<b>", "").replace("</b>", "")
+                story.append(Spacer(1, 6))
+                story.append(Paragraph(texto_h2, h2_style))
+            else:
+                story.append(Paragraph(linea_limpia, body_style))
+
+        # Compilar el documento usando el Canvas con numeración automática
+        doc.build(story, canvasmaker=NumberedCanvas)
         pdf_buffer.seek(0)
         
         return Response(
@@ -1339,5 +1446,4 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
             headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"Error generando PDF profesional: {str(e)}")
