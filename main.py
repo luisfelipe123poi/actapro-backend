@@ -1230,3 +1230,31 @@ async def eliminar_scanner(data: EliminarScannerRequest):
 async def obtener_historial_actas(email: str):
     actas = list(actas_collection.find({"email": email}, {"_id": 0}))
     return {"actas": actas}
+
+from bson import ObjectId
+
+@app.put("/api/scanners/renombrar")
+async def renombrar_scanner(data: dict):
+    email = data.get("email")
+    scanner_id = data.get("scanner_id")
+    nuevo_nombre = data.get("nuevo_nombre")
+    
+    result = scanners_historial_collection.update_one(
+        {"_id": ObjectId(scanner_id), "email": email},
+        {"$set": {"nombre": nuevo_nombre}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Escaneo no encontrado")
+    return {"message": "Escaneo renombrado con éxito"}
+
+@app.delete("/api/scanners/eliminar")
+async def eliminar_scanner(data: dict):
+    email = data.get("email")
+    scanner_id = data.get("scanner_id")
+    
+    result = scanners_historial_collection.delete_one(
+        {"_id": ObjectId(scanner_id), "email": email}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Escaneo no encontrado")
+    return {"message": "Escaneo eliminado correctamente"}
