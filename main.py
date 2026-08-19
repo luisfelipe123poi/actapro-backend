@@ -162,17 +162,22 @@ def registrar_usuario(data: AuthModel):
     if existing_user:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
 
-    # Actualizado: Si es free, le damos 3 horas de prueba inicial; si es de pago, 100 horas
-    horas_iniciales = 3.0 if data.plan == "free" else 100.0 
-    limite_inicial = 3.0 if data.plan == "free" else 30.0 # Límite mensual por defecto según el plan
+    limites_mensuales = {
+        "free": 3.0,
+        "basico": 15.0,
+        "profesional": 60.0,
+        "corporativo": 200.0
+    }
+    
+    limite_inicial = limites_mensuales.get(data.plan, 3.0)
 
     nuevo_usuario = {
         "email": data.email,
         "password": data.password,
         "plan": data.plan,
-        "horas_restantes": horas_iniciales,
+        "horas_restantes": limite_inicial,
         "horas_usadas_mes": 0.0, 
-        "limite_horas_mes": limite_inicial, # Guardamos el límite de horas en la BD
+        "limite_horas_mes": limite_inicial,
     }
 
     users_collection.insert_one(nuevo_usuario)
@@ -180,8 +185,8 @@ def registrar_usuario(data: AuthModel):
         "message": "Usuario registrado con éxito en MongoDB",
         "email": data.email,
         "plan": data.plan,
-        "horas_restantes": horas_iniciales,
-        "limite_horas_mes": limite_inicial, # Devolvemos también el límite
+        "horas_restantes": limite_inicial,
+        "limite_horas_mes": limite_inicial,
     }
 
 
@@ -191,16 +196,22 @@ def login_usuario(data: AuthModel):
     if not user or user["password"] != data.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
-    # Definir límite por defecto si el usuario antiguo no lo tiene en la BD
-    limite_por_defecto = 3.0 if user.get("plan", "free") == "free" else 30.0
+    plan_usuario = user.get("plan", "free")
+    limites_mensuales = {
+        "free": 3.0,
+        "basico": 15.0,
+        "profesional": 60.0,
+        "corporativo": 200.0
+    }
+    limite_por_defecto = limites_mensuales.get(plan_usuario, 3.0)
 
     return {
         "message": "Login exitoso",
         "email": user["email"],
-        "plan": user["plan"],
+        "plan": plan_usuario,
         "horas_restantes": user.get("horas_restantes", 0.0),
         "horas_usadas_mes": user.get("horas_usadas_mes", 0.0),
-        "limite_horas_mes": user.get("limite_horas_mes", limite_por_defecto), # Se envía al frontend
+        "limite_horas_mes": user.get("limite_horas_mes", limite_por_defecto),
     }
 
 
@@ -212,15 +223,21 @@ def get_user_status(email: str):
             status_code=404, detail="Usuario no encontrado en la base de datos"
         )
 
-    # Actualizado: Definimos el límite por defecto a 3.0 para el plan free y 15.0/30.0 para pago
-    limite_por_defecto = 3.0 if usuario.get("plan", "free") == "free" else 30.0
+    plan_usuario = usuario.get("plan", "free")
+    limites_mensuales = {
+        "free": 3.0,
+        "basico": 15.0,
+        "profesional": 60.0,
+        "corporativo": 200.0
+    }
+    limite = limites_mensuales.get(plan_usuario, 3.0)
 
     return {
         "email": usuario.get("email"),
-        "plan": usuario.get("plan", "free"),
+        "plan": plan_usuario,
         "horas_restantes": usuario.get("horas_restantes", 0.0),
         "horas_usadas_mes": usuario.get("horas_usadas_mes", 0.0),
-        "limite_horas_mes": usuario.get("limite_horas_mes", limite_por_defecto)
+        "limite_horas_mes": usuario.get("limite_horas_mes", limite)
     }
 
 
