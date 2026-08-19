@@ -1303,6 +1303,13 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 
+from fastapi.responses import Response
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
+import re
+
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     try:
@@ -1319,16 +1326,24 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = registro.get("contenido", "")
 
-        # Limpiar etiquetas HTML básicas para adaptarlas a los párrafos de ReportLab
+        # Transformación inteligente de etiquetas HTML a estilos limpios de ReportLab
         texto_limpio = contenido_html
-        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<b>\1</b><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        
+        # Convertir H1 en títulos principales destacados
+        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><b>\1</b><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        # Convertir H2 en subtítulos destacados
         texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><b>\1</b><br/>', texto_limpio, flags=re.IGNORECASE)
+        # Convertir párrafos y saltos
         texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
         texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
         
-        # Eliminar cualquier etiqueta HTML sobrante que quede suelta
-        texto_limpio = re.sub(r'<[^>]+>', '', texto_limpio)
-        # Limpiar entidades HTML comunes
+        # Conservar negritas y strong convirtiéndolos al formato seguro de ReportLab
+        texto_limpio = re.sub(r'<(b|strong)[^>]*>(.*?)</\1>', r'<b>\2</b>', texto_limpio, flags=re.IGNORECASE)
+        
+        # Eliminar cualquier otra etiqueta HTML no deseada manteniendo el texto interno
+        texto_limpio = re.sub(r'<(?!\/?b\b)[^>]+>', '', texto_limpio)
+        
+        # Limpiar entidades HTML
         texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
         # Configuración del PDF en memoria usando ReportLab
@@ -1349,14 +1364,13 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
             'ScannerBody',
             parent=styles['Normal'],
             fontName='Helvetica',
-            fontSize=9.5,
-            leading=13.5,
+            fontSize=10,
+            leading=14.5,
             alignment=TA_JUSTIFY,
-            spaceAfter=6
+            spaceAfter=8
         )
 
-        # (Se eliminó la línea que agregaba "DOCUMENTO ESCANEADO:" al story)
-
+        # Ya no se añade la cabecera de "DOCUMENTO ESCANEADO"
         lineas = texto_limpio.split('\n')
         for linea in lineas:
             if linea.strip():
