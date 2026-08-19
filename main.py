@@ -955,11 +955,10 @@ async def escanear_documento(
                 limite_tokens = usuario.get("limite_tokens_mes", 0)
                 # Si el usuario tiene un límite asignado mayor a 0 y ya lo alcanzó
                 if limite_tokens > 0 and tokens_usados >= limite_tokens:
-                    return {
-                        "status": "limit_reached",
-                        "message": "Has alcanzado el límite de tokens mensuales de tu plan. Actualiza tu suscripción para continuar.",
-                        "action": "upgrade_subscription"
-                    }
+                    raise HTTPException(
+                        status_code=403, 
+                        detail="Has alcanzado el límite de tokens mensuales de tu plan. Actualiza tu suscripción para continuar."
+                    )
 
         # 1. Leer los bytes del archivo subido desde el frontend
         file_bytes = await file.read()
