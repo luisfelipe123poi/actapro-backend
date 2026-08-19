@@ -316,128 +316,130 @@ from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY, TA_CENTER
 
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
-    # Buscar el acta en la base de datos por nombre o por _id de MongoDB
-    acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
-    if not acta:
-        try:
-            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-        except Exception:
-            pass
+    try:
+        # Buscar el acta en la base de datos por nombre o por _id de MongoDB
+        acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
+        if not acta:
+            try:
+                acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+            except Exception:
+                pass
+                
+        if not acta:
+            raise HTTPException(status_code=404, detail="Acta no encontrada.")
             
-    if not acta:
-        raise HTTPException(status_code=404, detail="Acta no encontrada.")
+        contenido_texto = acta.get("contenido", "")
+        nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", "").replace(".pdf", "") + ".pdf"
         
-    contenido_texto = acta.get("contenido", "")
-    nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", "").replace(".pdf", "") + ".pdf"
-    
-    # Configuración del PDF en memoria usando ReportLab Platypus
-    pdf_buffer = io.BytesIO()
-    
-    doc = SimpleDocTemplate(
-        pdf_buffer, 
-        pagesize=letter,
-        rightMargin=54,
-        leftMargin=54,
-        topMargin=54,
-        bottomMargin=54
-    )
-    
-    story = []
-    
-    # Estilos profesionales
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'ActaMainTitle',
-        parent=styles['Heading1'],
-        fontName='Helvetica-Bold',
-        fontSize=14,
-        leading=18,
-        alignment=TA_CENTER,
-        spaceAfter=15,
-        textColor=styles['Normal'].textColor
-    )
-    
-    subtitle_style = ParagraphStyle(
-        'ActaSubTitle',
-        parent=styles['Heading2'],
-        fontName='Helvetica-Bold',
-        fontSize=11,
-        leading=15,
-        alignment=TA_LEFT,
-        spaceBefore=10,
-        spaceAfter=6,
-        textColor=styles['Normal'].textColor
-    )
-    
-    body_style = ParagraphStyle(
-        'ActaBody',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=10,
-        leading=14,
-        alignment=TA_JUSTIFY,
-        spaceAfter=8
-    )
-    
-    bullet_style = ParagraphStyle(
-        'ActaBullet',
-        parent=body_style,
-        leftIndent=15,
-        spaceAfter=4
-    )
-    
-    # Añadir título principal al documento
-    story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
-    story.append(Spacer(1, 10))
-    
-    # Procesar el contenido línea por línea
-    lineas = contenido_texto.split('\n')
-    for linea in linea:
-        linea_original = linea.strip()
+        # Configuración del PDF en memoria usando ReportLab Platypus
+        pdf_buffer = io.BytesIO()
         
-        if not linea_original:
-            story.append(Spacer(1, 6))
-            continue
+        doc = SimpleDocTemplate(
+            pdf_buffer, 
+            pagesize=letter,
+            rightMargin=54,
+            leftMargin=54,
+            topMargin=54,
+            bottomMargin=54
+        )
+        
+        story = []
+        
+        # Estilos profesionales
+        styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            'ActaMainTitle',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=14,
+            leading=18,
+            alignment=TA_CENTER,
+            spaceAfter=15,
+            textColor=styles['Normal'].textColor
+        )
+        
+        subtitle_style = ParagraphStyle(
+            'ActaSubTitle',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=11,
+            leading=15,
+            alignment=TA_LEFT,
+            spaceBefore=10,
+            spaceAfter=6,
+            textColor=styles['Normal'].textColor
+        )
+        
+        body_style = ParagraphStyle(
+            'ActaBody',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            leading=14,
+            alignment=TA_JUSTIFY,
+            spaceAfter=8
+        )
+        
+        bullet_style = ParagraphStyle(
+            'ActaBullet',
+            parent=body_style,
+            leftIndent=15,
+            spaceAfter=4
+        )
+        
+        # Añadir título principal al documento
+        story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
+        story.append(Spacer(1, 10))
+        
+        # Procesar el contenido línea por línea (Corregido: lineas)
+        lineas = contenido_texto.split('\n')
+        for linea in lineas:
+            linea_original = linea.strip()
             
-        # Detectar si es un título/subtítulo markdown (#, ##, ###) o viene en mayúsculas sostenidas relevantes
-        es_encabezado_md = linea_original.startswith('#')
-        texto_limpio = linea_original.lstrip('#').strip()
-        
-        # Limpieza de caracteres de escape HTML básicos
-        texto_limpio = texto_limpio.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        
-        # Convertir negritas de Markdown (**texto**) a etiquetas de ReportLab (<b>texto</b>)
-        texto_limpio = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', texto_limpio)
-        
-        # Eliminar asteriscos sueltos o viñetas de markdown remanentes (* o - al inicio)
-        texto_limpio = re.sub(r'^[\*\-\•]\s*', '', texto_limpio)
-        # Limpiar asteriscos internos sueltos que no formen parte de una etiqueta <b>
-        texto_limpio = texto_limpio.replace('*', '')
+            if not linea_original:
+                story.append(Spacer(1, 6))
+                continue
+                
+            es_encabezado_md = linea_original.startswith('#')
+            texto_limpio = linea_original.lstrip('#').strip()
+            
+            # Limpieza de caracteres de escape HTML básicos
+            texto_limpio = texto_limpio.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            
+            # Convertir negritas de Markdown (**texto**) a etiquetas de ReportLab (<b>texto</b>)
+            texto_limpio = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', texto_limpio)
+            
+            # Eliminar asteriscos sueltos o viñetas de markdown remanentes
+            texto_limpio = re.sub(r'^[\*\-\•]\s*', '', texto_limpio)
+            texto_limpio = texto_limpio.replace('*', '')
 
-        if not texto_limpio:
-            continue
+            if not texto_limpio:
+                continue
 
-        # Lógica de asignación de estilos inteligente
-        if es_encabezado_md or (texto_limpio.isupper() and len(texto_limpio) < 80):
-            # Es un título o sección destacada
-            story.append(Paragraph(texto_limpio, subtitle_style))
-        elif linea_original.startswith(('*', '-', '•')):
-            # Es un elemento de lista / viñeta
-            story.append(Paragraph(f"• {texto_limpio}", bullet_style))
-        else:
-            # Párrafo de cuerpo normal
-            story.append(Paragraph(texto_limpio, body_style))
+            # Lógica de asignación de estilos inteligente
+            if es_encabezado_md or (texto_limpio.isupper() and len(texto_limpio) < 80):
+                story.append(Paragraph(texto_limpio, subtitle_style))
+            elif linea_original.startswith(('*', '-', '•')):
+                story.append(Paragraph(f"• {texto_limpio}", bullet_style))
+            else:
+                story.append(Paragraph(texto_limpio, body_style))
 
-    # Construir el PDF
-    doc.build(story)
-    pdf_buffer.seek(0)
-    
-    return Response(
-        content=pdf_buffer.getvalue(),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
-    )
+        # Construir el PDF
+        doc.build(story)
+        pdf_buffer.seek(0)
+        
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+        )
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        print(f"Error generando PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno al generar el PDF: {str(e)}")
 
 
 @app.post("/api/crear-preferencia-pago")
