@@ -1319,30 +1319,19 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = registro.get("contenido", "")
 
-        # 1. TRADUCIR ETIQUETAS HTML A ETIQUETAS SOPORTADAS POR REPORTLAB (<b>, <br/>)
-        texto_procesado = contenido_html
+        # Limpiar etiquetas HTML básicas para adaptarlas a los párrafos de ReportLab
+        texto_limpio = contenido_html
+        texto_limpio = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<b>\1</b><br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        texto_limpio = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<br/><b>\1</b><br/>', texto_limpio, flags=re.IGNORECASE)
+        texto_limpio = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_limpio, flags=re.IGNORECASE)
+        texto_limpio = re.sub(r'<br\s*/?>', r'<br/>', texto_limpio, flags=re.IGNORECASE)
         
-        # Convertir H1 a texto en negrita con mayor tamaño visual o espaciado
-        texto_procesado = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<br/><b>\1</b><br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
-        # Convertir H2, H3, H4 a negrita
-        texto_procesado = re.sub(r'<h[2-6][^>]*>(.*?)</h[2-6]>', r'<br/><b>\1</b><br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
-        
-        # Convertir párrafos y saltos de línea
-        texto_procesado = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
-        texto_procesado = re.sub(r'<br\s*/?>', r'<br/>', texto_procesado, flags=re.IGNORECASE | re.DOTALL)
-        
-        # Asegurar que las negritas existentes de Markdown o HTML se mantengan como <b>
-        texto_procesado = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', texto_procesado)
-        texto_procesado = re.sub(r'<strong>(.*?)</strong>', r'<b>\1</b>', texto_procesado, flags=re.IGNORECASE)
-        texto_procesado = re.sub(r'<b>(.*?)</b>', r'<b>\1</b>', texto_procesado, flags=re.IGNORECASE)
+        # Eliminar cualquier etiqueta HTML sobrante que quede suelta
+        texto_limpio = re.sub(r'<[^>]+>', '', texto_limpio)
+        # Limpiar entidades HTML comunes
+        texto_limpio = texto_limpio.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
-        # Eliminar cualquier otra etiqueta HTML remanente para evitar errores de parseo en ReportLab
-        texto_procesado = re.sub(r'<(?!/?b\b|/?br\b)[^>]+>', '', texto_procesado)
-        
-        # Limpiar entidades HTML
-        texto_procesado = texto_procesado.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-
-        # 2. CONFIGURACIÓN DE REPORTLAB
+        # Configuración del PDF en memoria usando ReportLab
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             pdf_buffer, 
@@ -1356,37 +1345,22 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         story = []
         styles = getSampleStyleSheet()
         
-        # Estilo para el título principal del documento
-        title_style = ParagraphStyle(
-            'ScannerTitle',
-            parent=styles['Heading1'],
-            fontName='Helvetica-Bold',
-            fontSize=13,
-            leading=16,
-            alignment=TA_LEFT,
-            spaceAfter=15
-        )
-        
-        # Estilo general del cuerpo (ReportLab interpretará automáticamente las etiquetas <b> que inyectamos)
         body_style = ParagraphStyle(
             'ScannerBody',
             parent=styles['Normal'],
             fontName='Helvetica',
-            fontSize=10,
-            leading=14,
+            fontSize=9.5,
+            leading=13.5,
             alignment=TA_JUSTIFY,
             spaceAfter=6
         )
 
-        story.append(Paragraph(f"DOCUMENTO ESCANEADO: {registro.get('nombre', '')}", title_style))
-        story.append(Spacer(1, 10))
+        # (Se eliminó la línea que agregaba "DOCUMENTO ESCANEADO:" al story)
 
-        # 3. CONSTRUCCIÓN DE PÁRRAFOS LÍNEA POR LÍNEA
-        lineas = texto_procesado.split('\n')
+        lineas = texto_limpio.split('\n')
         for linea in lineas:
-            linea_limpia = linea.strip()
-            if linea_limpia:
-                story.append(Paragraph(linea_limpia, body_style))
+            if linea.strip():
+                story.append(Paragraph(linea.strip(), body_style))
             else:
                 story.append(Spacer(1, 4))
 
@@ -1399,4 +1373,4 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
             headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
         )
     except Exception as e:
-        raise HTTPException(status_status_code=500 if 'status_status_code' not in locals() else 500, detail=f"Error generando PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
