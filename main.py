@@ -1,4 +1,5 @@
 import datetime 
+from datetime import datetime
 import hashlib
 import os
 import shutil
@@ -1069,7 +1070,7 @@ STRICT RULES:
             nuevo_registro = {
                 "email": email,
                 "nombre": file.filename or "Documento Escaneado",
-                "fecha": datetime.datetime.utcnow().isoformat(),
+                "fecha": datetime.utcnow().isoformat(),
                 "tokens": tokens_consumidos,
                 "contenido": resultado_html
             }
