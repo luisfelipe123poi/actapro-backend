@@ -1229,3 +1229,30 @@ async def eliminar_scanner(data: EliminarScannerRequest):
 async def obtener_historial_actas(email: str):
     actas = list(actas_collection.find({"email": email}, {"_id": 0}))
     return {"actas": actas}
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/api/scanners/descargar/{scanner_id}")
+async def descargar_scanner(scanner_id: str, email: str):
+    try:
+        # Intentar buscar por ID de objeto (ObjectId)
+        filtro = {"_id": ObjectId(scanner_id), "email": email}
+        registro = scanners_historial_collection.find_one(filtro)
+        
+        if not registro:
+            # Intentar buscar por nombre si el ID falla
+            registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
+            
+        if not registro:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+
+        nombre_archivo = f"{registro['nombre'].replace('.pdf', '').replace('.jpg', '')}.html"
+        contenido_html = registro['contenido']
+
+        # Retornar como descarga forzada
+        return HTMLResponse(
+            content=contenido_html,
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
