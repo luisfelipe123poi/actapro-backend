@@ -79,6 +79,7 @@ db = mongo_client["actabot_db"]
 users_collection = db["users"]
 actas_collection = db["actas_historial"]
 transripciones_collection = db["transripciones_cache"]
+scanners_historial_collection = db["scanners_historial"]  # <--- NUEVA COLECCIÓN PARA ESCANEOS
 
 # Configurar índice TTL para eliminar automáticamente la caché de transcripciones pasados 30 días (2592000 segundos)
 try:
@@ -1100,3 +1101,112 @@ async def descargar_acta_pdf(acta_id: str, email: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
     )
+
+from bson import ObjectId
+from pydantic import BaseModel
+
+# ================= MODELOS PYDANTIC PARA SCANNERS =================
+class GuardarScannerRequest(BaseModel):
+    email: str
+    nombre: str
+    tokens: int
+    contenido: str
+
+class RenombrarScannerRequest(BaseModel):
+    email: str
+    scanner_id: str
+    nuevo_nombre: str
+
+class EliminarScannerRequest(BaseModel):
+    email: str
+    scanner_id: str
+
+
+# ================= ENDPOINTS DE SCANNERS =================
+
+@app.get("/api/scanners/historial")
+def obtener_historial_scanners(email: str):
+    scanners_cursor = scanners_historial_collection.find({"email": email})
+    scanners = []
+    for doc in scanners_cursor:
+        doc["id"] = str(doc["_id"])
+        del doc["_id"]
+        scanners.append(doc)
+    return {"scanners": scanners}
+
+
+@app.post("/api/scanners/guardar")
+async def guardar_escaneo(data: GuardarScannerRequest):
+    try:
+        nuevo_registro = {
+            "email": data.email,
+            "nombre": data.nombre,
+            "fecha": datetime.utcnow().isoformat(),
+            "tokens": data.tokens,
+            "contenido": data.contenido
+        }
+        
+        resultado = scanners_historial_collection.insert_one(nuevo_registro)
+        
+        return {
+            "message": "¡Escaneo guardado correctamente!", 
+            "id": str(resultado.inserted_id)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/scanners/renombrar")
+async def renombrar_scanner(data: RenombrarScannerRequest):
+    try:
+        resultado = scanners_historial_collection.update_one(
+            {"email": data.email, "nombre": data.scanner_id},
+            {"$set": {"nombre": data.nuevo_nombre}},
+        )
+
+        if resultado.matched_count == 0:
+            try:
+                resultado = scanners_historial_collection.update_one(
+                    {"_id": ObjectId(data.scanner_id), "email": data.email},
+                    {"$set": {"nombre": data.nuevo_nombre}},
+                )
+            except Exception:
+                pass
+
+        if resultado.matched_count == 0:
+            raise HTTPException(
+                status_code=404, detail="Escaneo no encontrado o no autorizado."
+            )
+
+        return {"message": "¡Escaneo renombrado con éxito!"}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/scanners/eliminar")
+async def eliminar_scanner(data: EliminarScannerRequest):
+    try:
+        resultado = scanners_historial_collection.delete_one(
+            {"email": data.email, "nombre": data.scanner_id}
+        )
+
+        if resultado.deleted_count == 0:
+            try:
+                resultado = scanners_historial_collection.delete_one(
+                    {"_id": ObjectId(data.scanner_id), "email": data.email}
+                )
+            except Exception:
+                pass
+
+        if resultado.deleted_count == 0:
+            raise HTTPException(
+                status_code=404, detail="Escaneo no encontrado para eliminar."
+            )
+
+        return {"message": "Escaneo eliminado correctamente."}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
