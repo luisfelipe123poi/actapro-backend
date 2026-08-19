@@ -305,6 +305,15 @@ async def eliminar_acta(data: EliminarActaRequest):
     raise HTTPException(status_code=500, detail=str(e))
 
 
+import io
+import re
+from fastapi import FastAPI, HTTPException, Response
+from bson import ObjectId
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY, TA_CENTER
+
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
     # Buscar el acta en la base de datos por nombre o por _id de MongoDB
@@ -324,7 +333,6 @@ async def descargar_acta_pdf(acta_id: str, email: str):
     # Configuración del PDF en memoria usando ReportLab Platypus
     pdf_buffer = io.BytesIO()
     
-    # Márgenes de 0.5 pulgadas (36 puntos) o 54 puntos (3/4 de pulgada)
     doc = SimpleDocTemplate(
         pdf_buffer, 
         pagesize=letter,
@@ -340,13 +348,25 @@ async def descargar_acta_pdf(acta_id: str, email: str):
     styles = getSampleStyleSheet()
     
     title_style = ParagraphStyle(
-        'ActaTitle',
+        'ActaMainTitle',
         parent=styles['Heading1'],
         fontName='Helvetica-Bold',
-        fontSize=13,
-        leading=16,
-        alignment=TA_LEFT,
+        fontSize=14,
+        leading=18,
+        alignment=TA_CENTER,
         spaceAfter=15,
+        textColor=styles['Normal'].textColor
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'ActaSubTitle',
+        parent=styles['Heading2'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        leading=15,
+        alignment=TA_LEFT,
+        spaceBefore=10,
+        spaceAfter=6,
         textColor=styles['Normal'].textColor
     )
     
@@ -360,26 +380,54 @@ async def descargar_acta_pdf(acta_id: str, email: str):
         spaceAfter=8
     )
     
+    bullet_style = ParagraphStyle(
+        'ActaBullet',
+        parent=body_style,
+        leftIndent=15,
+        spaceAfter=4
+    )
+    
     # Añadir título principal al documento
     story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
     story.append(Spacer(1, 10))
     
-    # Procesar el contenido línea por línea o párrafo por párrafo
+    # Procesar el contenido línea por línea
     lineas = contenido_texto.split('\n')
-    for linea in lineas:
-        # Limpieza básica de caracteres Markdown para el reporte PDF
-        linea_limpia = linea.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    for linea in linea:
+        linea_original = linea.strip()
         
-        # Reemplazar negritas de markdown (**texto**) por etiquetas HTML soportadas por ReportLab (<b>texto</b>)
-        import re
-        linea_limpia = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', linea_limpia)
-        linea_limpia = linea_limpia.replace('*', '').strip()
-        
-        if linea_limpia:
-            story.append(Paragraph(linea_limpia, body_style))
-        else:
-            # Si hay una línea vacía, agregamos un pequeño espacio vertical
+        if not linea_original:
             story.append(Spacer(1, 6))
+            continue
+            
+        # Detectar si es un título/subtítulo markdown (#, ##, ###) o viene en mayúsculas sostenidas relevantes
+        es_encabezado_md = linea_original.startswith('#')
+        texto_limpio = linea_original.lstrip('#').strip()
+        
+        # Limpieza de caracteres de escape HTML básicos
+        texto_limpio = texto_limpio.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        
+        # Convertir negritas de Markdown (**texto**) a etiquetas de ReportLab (<b>texto</b>)
+        texto_limpio = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', texto_limpio)
+        
+        # Eliminar asteriscos sueltos o viñetas de markdown remanentes (* o - al inicio)
+        texto_limpio = re.sub(r'^[\*\-\•]\s*', '', texto_limpio)
+        # Limpiar asteriscos internos sueltos que no formen parte de una etiqueta <b>
+        texto_limpio = texto_limpio.replace('*', '')
+
+        if not texto_limpio:
+            continue
+
+        # Lógica de asignación de estilos inteligente
+        if es_encabezado_md or (texto_limpio.isupper() and len(texto_limpio) < 80):
+            # Es un título o sección destacada
+            story.append(Paragraph(texto_limpio, subtitle_style))
+        elif linea_original.startswith(('*', '-', '•')):
+            # Es un elemento de lista / viñeta
+            story.append(Paragraph(f"• {texto_limpio}", bullet_style))
+        else:
+            # Párrafo de cuerpo normal
+            story.append(Paragraph(texto_limpio, body_style))
 
     # Construir el PDF
     doc.build(story)
