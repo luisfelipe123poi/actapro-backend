@@ -115,19 +115,22 @@ PRECIOS_PLANES = {
     "basico": {
         "nombre": "Plan Básico",
         "precio": 153000.0,
-        "tokens": 50,
+        "tokens_mensuales": 100000,      # Actualizado a 100k tokens
+        "documentos_estimados": 40,      # Referencia para el usuario
         "limite_horas": 15.0
     },
     "profesional": {
-        "nombre": "Plan Profesional",
+        "nombre": "Plan Intermedio",      # Ajustado a "Intermedio" según tu tabla
         "precio": 479000.0,
-        "tokens": 200,
+        "tokens_mensuales": 300000,      # Actualizado a 300k tokens
+        "documentos_estimados": 120,     # Referencia para el usuario
         "limite_horas": 60.0,
     },
     "corporativo": {
-        "nombre": "Plan Corporativo",
+        "nombre": "Plan Profesional / Pro", # Ajustado a "Pro" según tu tabla
         "precio": 939000.0,
-        "tokens": 9999,
+        "tokens_mensuales": 1000000,     # Actualizado a 1M tokens
+        "documentos_estimados": 400,     # Referencia para el usuario
         "limite_horas": 200.0,
     },
 }
@@ -156,37 +159,43 @@ class EliminarActaRequest(BaseModel):
   acta_id: str
 
 
+# Estructura maestra de configuración
+CONFIGURACION_PLANES = {
+    "free": {"tokens": 0, "horas": 3.0},
+    "basico": {"tokens": 100000, "horas": 15.0},
+    "profesional": {"tokens": 300000, "horas": 60.0},
+    "corporativo": {"tokens": 1000000, "horas": 200.0}
+}
+
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
     existing_user = users_collection.find_one({"email": data.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="El correo ya está registrado.")
 
-    limites_mensuales = {
-        "free": 3.0,
-        "basico": 15.0,
-        "profesional": 60.0,
-        "corporativo": 200.0
-    }
-    
-    limite_inicial = limites_mensuales.get(data.plan, 3.0)
+    # Obtener configuración del plan
+    plan_config = CONFIGURACION_PLANES.get(data.plan, CONFIGURACION_PLANES["free"])
 
     nuevo_usuario = {
         "email": data.email,
-        "password": data.password,
+        "password": data.password, # Nota: Recuerda hashear esto en producción
         "plan": data.plan,
-        "horas_restantes": limite_inicial,
-        "horas_usadas_mes": 0.0, 
-        "limite_horas_mes": limite_inicial,
+        # Gestión de Horas
+        "horas_restantes": plan_config["horas"],
+        "horas_usadas_mes": 0.0,
+        "limite_horas_mes": plan_config["horas"],
+        # Gestión de Tokens
+        "tokens_usados": 0,
+        "limite_tokens_mes": plan_config["tokens"]
     }
 
     users_collection.insert_one(nuevo_usuario)
     return {
-        "message": "Usuario registrado con éxito en MongoDB",
+        "message": "Usuario registrado con éxito",
         "email": data.email,
         "plan": data.plan,
-        "horas_restantes": limite_inicial,
-        "limite_horas_mes": limite_inicial,
+        "tokens_limite": plan_config["tokens"],
+        "limite_horas_mes": plan_config["horas"]
     }
 
 
@@ -196,22 +205,14 @@ def login_usuario(data: AuthModel):
     if not user or user["password"] != data.password:
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
-    plan_usuario = user.get("plan", "free")
-    limites_mensuales = {
-        "free": 3.0,
-        "basico": 15.0,
-        "profesional": 60.0,
-        "corporativo": 200.0
-    }
-    limite_por_defecto = limites_mensuales.get(plan_usuario, 3.0)
-
     return {
         "message": "Login exitoso",
         "email": user["email"],
-        "plan": plan_usuario,
+        "plan": user.get("plan", "free"),
+        "tokens_usados": user.get("tokens_usados", 0),
+        "limite_tokens_mes": user.get("limite_tokens_mes", 0),
         "horas_restantes": user.get("horas_restantes", 0.0),
-        "horas_usadas_mes": user.get("horas_usadas_mes", 0.0),
-        "limite_horas_mes": user.get("limite_horas_mes", limite_por_defecto),
+        "limite_horas_mes": user.get("limite_horas_mes", 0.0)
     }
 
 
@@ -219,25 +220,16 @@ def login_usuario(data: AuthModel):
 def get_user_status(email: str):
     usuario = users_collection.find_one({"email": email})
     if not usuario:
-        raise HTTPException(
-            status_code=404, detail="Usuario no encontrado en la base de datos"
-        )
-
-    plan_usuario = usuario.get("plan", "free")
-    limites_mensuales = {
-        "free": 3.0,
-        "basico": 15.0,
-        "profesional": 60.0,
-        "corporativo": 200.0
-    }
-    limite = limites_mensuales.get(plan_usuario, 3.0)
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     return {
         "email": usuario.get("email"),
-        "plan": plan_usuario,
+        "plan": usuario.get("plan", "free"),
+        "tokens_usados": usuario.get("tokens_usados", 0),
+        "limite_tokens_mes": usuario.get("limite_tokens_mes", 0),
         "horas_restantes": usuario.get("horas_restantes", 0.0),
         "horas_usadas_mes": usuario.get("horas_usadas_mes", 0.0),
-        "limite_horas_mes": usuario.get("limite_horas_mes", limite)
+        "limite_horas_mes": usuario.get("limite_horas_mes", 0.0)
     }
 
 
@@ -401,129 +393,136 @@ async def descargar_acta_pdf(acta_id: str, email: str):
 
 @app.post("/api/crear-preferencia-pago")
 def crear_preferencia_pago(data: PaymentPreferenceModel):
-  if not mp_sdk:
-    raise HTTPException(
-        status_code=500, detail="Mercado Pago no está configurado en el servidor."
-    )
+    if not mp_sdk:
+        raise HTTPException(
+            status_code=500, detail="Mercado Pago no está configurado en el servidor."
+        )
 
-  plan_recibido = data.plan_name.lower().strip()
+    plan_recibido = data.plan_name.lower().strip()
 
-  mapeo = {
-      "basico": "basico",
-      "básico": "basico",
-      "plan basico": "basico",
-      "plan básico": "basico",
-      "profesional": "profesional",
-      "plan profesional": "profesional",
-      "corporativo": "corporativo",
-      "plan corporativo": "corporativo",
-  }
-
-  plan_id = mapeo.get(plan_recibido)
-  if not plan_id or plan_id not in PRECIOS_PLANES:
-    raise HTTPException(
-        status_code=400, detail=f"Plan no válido: '{data.plan_name}'"
-    )
-
-  info_plan = PRECIOS_PLANES[plan_id]
-
-  user = users_collection.find_one({"email": data.email})
-  if not user:
-    # Si el usuario no existe, se crea con plan free y 1 hora mensual gratuita
-    users_collection.insert_one({
-        "email": data.email,
-        "password": "temp_password_temporal",
-        "plan": "free",
-        "horas_usadas_mes": 0.0,
-    })
-
-  preference_data = {
-      "items": [{
-          "title": f"ActaBot PH - {info_plan['nombre']}",
-          "quantity": 1,
-          "currency_id": "COP",
-          "unit_price": info_plan["precio"],
-      }],
-      "payer": {"email": data.email},
-      "back_urls": {
-          "success": "https://actapro-backend.onrender.com/pago-exitoso",
-          "failure": "https://actapro-backend.onrender.com/pago-fallido",
-          "pending": "https://actapro-backend.onrender.com/pago-pendiente",
-      },
-      "auto_return": "approved",
-      "notification_url": (
-          "https://actapro-backend.onrender.com/api/webhook-mercadopago"
-      ),
-      "statement_descriptor": "ACTABOT PH",
-      "external_reference": data.email,
-  }
-
-  try:
-    preference_response = mp_sdk.preference().create(preference_data)
-    preference = preference_response.get("response", preference_response)
-    init_point = preference.get("init_point")
-    sandbox_init_point = preference.get("sandbox_init_point")
-
-    if not init_point:
-      raise HTTPException(
-          status_code=400,
-          detail=(
-              "Mercado Pago rechazó la preferencia o devolvió credenciales"
-              " inválidas."
-          ),
-      )
-
-    return {
-        "init_point": init_point,
-        "sandbox_init_point": sandbox_init_point,
+    # Mapeo actualizado
+    mapeo = {
+        "basico": "basico",
+        "básico": "basico",
+        "plan basico": "basico",
+        "plan básico": "basico",
+        "profesional": "profesional", # Corresponde a tu plan intermedio
+        "plan profesional": "profesional",
+        "corporativo": "corporativo",
+        "plan corporativo": "corporativo",
     }
-  except Exception as e:
-    raise HTTPException(status_code=500, detail=str(e))
 
+    plan_id = mapeo.get(plan_recibido)
+    if not plan_id or plan_id not in PRECIOS_PLANES:
+        raise HTTPException(
+            status_code=400, detail=f"Plan no válido: '{data.plan_name}'"
+        )
+
+    info_plan = PRECIOS_PLANES[plan_id]
+
+    # Verificar o crear usuario base
+    user = users_collection.find_one({"email": data.email})
+    if not user:
+        users_collection.insert_one({
+            "email": data.email,
+            "password": "temp_password_temporal",
+            "plan": "free",
+            "tokens_usados": 0,
+            "limite_tokens_mes": 0,
+            "horas_usadas_mes": 0.0,
+            "horas_restantes": 0.0,
+            "limite_horas_mes": 3.0,
+        })
+
+    preference_data = {
+        "items": [{
+            "title": f"ActaBot PH - {info_plan['nombre']}",
+            "quantity": 1,
+            "currency_id": "COP",
+            "unit_price": float(info_plan["precio"]),
+        }],
+        "payer": {"email": data.email},
+        "back_urls": {
+            "success": "https://actapro-backend.onrender.com/pago-exitoso",
+            "failure": "https://actapro-backend.onrender.com/pago-fallido",
+            "pending": "https://actapro-backend.onrender.com/pago-pendiente",
+        },
+        "auto_return": "approved",
+        "notification_url": "https://actapro-backend.onrender.com/api/webhook-mercadopago",
+        "statement_descriptor": "ACTABOT PH",
+        "external_reference": data.email,
+    }
+
+    try:
+        preference_response = mp_sdk.preference().create(preference_data)
+        preference = preference_response.get("response", preference_response)
+        init_point = preference.get("init_point")
+        sandbox_init_point = preference.get("sandbox_init_point")
+
+        if not init_point:
+            raise HTTPException(
+                status_code=400,
+                detail="Mercado Pago rechazó la preferencia o devolvió credenciales inválidas.",
+            )
+
+        return {
+            "init_point": init_point,
+            "sandbox_init_point": sandbox_init_point,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/webhook-mercadopago")
 async def webhook_mercadopago(request: Request):
-  try:
-    body = await request.json()
-    if body.get("type") == "payment":
-      payment_id = body.get("data", {}).get("id")
-      if payment_id and mp_sdk:
-        payment_info = mp_sdk.payment().get(payment_id)
-        payment = payment_info.get("response", {})
+    try:
+        body = await request.json()
+        if body.get("type") == "payment":
+            payment_id = body.get("data", {}).get("id")
+            if payment_id and mp_sdk:
+                payment_info = mp_sdk.payment().get(payment_id)
+                payment = payment_info.get("response", {})
 
-        if payment.get("status") == "approved":
-          payer_email = payment.get("payer", {}).get(
-              "email"
-          ) or payment.get("external_reference")
-          if payer_email:
-            items = payment.get("additional_info", {}).get("items", []) or (
-                payment.get("items", [])
-            )
-            plan_asignado = "profesional"
-            tokens_otorgados = 200
+                if payment.get("status") == "approved":
+                    payer_email = payment.get("payer", {}).get("email") or payment.get("external_reference")
+                    if payer_email:
+                        items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
+                        
+                        # Plan por defecto si no se detecta explícitamente
+                        plan_asignado = "basico"
 
-            for item in items:
-              title_lower = item.get("title", "").lower()
-              if "básico" in title_lower or "basico" in title_lower:
-                plan_asignado = "basico"
-                tokens_otorgados = 50
-              elif "corporativo" in title_lower:
-                plan_asignado = "corporativo"
-                tokens_otorgados = 9999
+                        for item in items:
+                            title_lower = item.get("title", "").lower()
+                            if "corporativo" in title_lower:
+                                plan_asignado = "corporativo"
+                            elif "profesional" in title_lower or "intermedio" in title_lower:
+                                plan_asignado = "profesional"
+                            elif "básico" in title_lower or "basico" in title_lower:
+                                plan_asignado = "basico"
 
-            users_collection.update_one(
-                {"email": payer_email},
-                {
-                    "$set": {
-                        "plan": plan_asignado,
-                        "tokens": tokens_otorgados,
-                    }
-                },
-            )
-  except Exception as e:
-    print(f"Error en webhook: {e}")
+                        # Obtener configuración del plan desde PRECIOS_PLANES (o CONFIGURACION_PLANES)
+                        info_plan = PRECIOS_PLANES.get(plan_asignado, PRECIOS_PLANES["basico"])
+                        
+                        tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
+                        horas_otorgadas = info_plan.get("limite_horas", 15.0)
 
-  return {"status": "ok"}
+                        # Actualizar en la base de datos reseteando los contadores de uso actual
+                        users_collection.update_one(
+                            {"email": payer_email},
+                            {
+                                "$set": {
+                                    "plan": plan_asignado,
+                                    "tokens_usados": 0,
+                                    "limite_tokens_mes": tokens_otorgados,
+                                    "horas_usadas_mes": 0.0,
+                                    "horas_restantes": horas_otorgadas,
+                                    "limite_horas_mes": horas_otorgadas,
+                                }
+                            },
+                        )
+    except Exception as e:
+        print(f"Error en webhook: {e}")
+
+    return {"status": "ok"}
 
 import ffmpeg
 
@@ -896,6 +895,19 @@ async def escanear_documento(
     email: Optional[str] = Form(None)
 ):
     try:
+        # 0. VALIDAR USUARIO Y CUOTA DE TOKENS SI SE PROPORCIONA EMAIL
+        if email:
+            usuario = users_collection.find_one({"email": email})
+            if usuario:
+                tokens_usados = usuario.get("tokens_usados", 0)
+                limite_tokens = usuario.get("limite_tokens_mes", 0)
+                # Si el usuario tiene un límite asignado mayor a 0 y ya lo alcanzó
+                if limite_tokens > 0 and tokens_usados >= limite_tokens:
+                    raise HTTPException(
+                        status_code=403, 
+                        detail="Has alcanzado el límite de tokens mensuales de tu plan. Actualiza tu suscripción para continuar."
+                    )
+
         # 1. Leer los bytes del archivo subido desde el frontend
         file_bytes = await file.read()
         filename = file.filename.lower()
@@ -980,8 +992,15 @@ REGLAS ESTRICTAS:
             temperature=0.0
         )
 
-        # CORREGIDO: Se agregó [0] correctamente a choices
         resultado_html = response_openai.choices[0].message.content.strip()
+
+        # Descontar / sumar tokens consumidos en la BD si el usuario está autenticado
+        if email and hasattr(response_openai, "usage") and response_openai.usage:
+            tokens_consumidos = response_openai.usage.total_tokens
+            users_collection.update_one(
+                {"email": email},
+                {"$inc": {"tokens_usados": tokens_consumidos}}
+            )
 
         # Limpieza defensiva por si el modelo por inercia agrega bloques de código
         if resultado_html.startswith("```html"):
@@ -998,9 +1017,11 @@ REGLAS ESTRICTAS:
             "transcripcion": resultado_html
         }
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error procesando el archivo: {str(e)}")
-
+        
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
     # Buscar el acta en la base de datos por _id de MongoDB o por nombre
