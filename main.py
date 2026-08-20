@@ -1484,17 +1484,21 @@ import openai
 # 1. Inicialización obligatoria de FastAPI
 app = FastAPI(title="ActaProCore Soporte API")
 
-# Configuración de CORS por si tu frontend y backend están en dominios o puertos distintos
+# Configuración de CORS crítica para permitir peticiones desde tu frontend hacia Render
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, cambia esto por tu dominio exacto (ej. ["https://actaprocore.com"])
+    allow_origins=[
+        "https://actaprocore.com",
+        "https://www.actaprocore.com",
+        "http://127.0.0.1:5500",  # Útil si pruebas localmente en desarrollo
+        "http://localhost:5500"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["*"],  # Permite POST, GET, OPTIONS, etc.
     allow_headers=["*"],
 )
 
 # 2. Configuración oficial del cliente de OpenAI para Python
-# Asegúrate de configurar la variable de entorno OPENAI_API_KEY en tu servidor
 client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # 3. Modelos Pydantic para validar los datos de entrada
@@ -1532,11 +1536,11 @@ async def soporte_faqs(req: ConsultaFAQRequest):
 @app.post("/api/soporte/verificar-plan")
 async def verificar_plan(req: ConsultaPlanRequest):
     try:
-        # Datos simulados del cliente (aquí conectarás tu base de datos real posteriormente)
+        # Datos simulados del cliente
         datos_consumo_real = {
             "planActivo": "Empresarial Pro",
             "horasTotalesMes": 20,
-            "horasConsumidas": 19.5,  # Casi al límite
+            "horasConsumidas": 19.5,
             "tokensDisponiblesScanners": 5000,
             "tokensUsadosScanners": 4800,
             "fechaRenovacion": "01/11/2026"
@@ -1544,7 +1548,6 @@ async def verificar_plan(req: ConsultaPlanRequest):
 
         porcentaje_horas = int((datos_consumo_real["horasConsumidas"] / datos_consumo_real["horasTotalesMes"]) * 100)
 
-        # Prompt estructurado para OpenAI
         prompt = (
             f"El cliente con ID {req.clienteId} ha solicitado información sobre el estado de su plan actual ({datos_consumo_real['planActivo']}).\n\n"
             f"Datos de consumo actuales:\n"
@@ -1580,4 +1583,3 @@ async def verificar_plan(req: ConsultaPlanRequest):
     except Exception as e:
         print(f"Error crítico en verificación de plan: {e}")
         raise HTTPException(status_code=500, detail="Error interno del servidor al verificar el plan")
-
