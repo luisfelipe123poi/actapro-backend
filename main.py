@@ -747,7 +747,7 @@ async def procesar_asamblea(
                 "file_hash": file_hash,
                 "filename": file.filename,
                 "texto_transcrito": texto_transcrito,
-                "fecha": datetime.utcnow().isoformat(),
+                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "createdAt": datetime.datetime.utcnow(),
             })
 
@@ -867,6 +867,8 @@ async def procesar_asamblea(
         )
 
     except Exception as e:
+        import traceback
+        traceback.print_exc() # Esto imprimirá el error exacto en los logs de Render
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
