@@ -1480,16 +1480,15 @@ from pydantic import BaseModel
 import os
 import openai
 
-app = FastAPI()
-
-# Configuración del cliente de OpenAI usando la variable de entorno
-client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
+# Modelos Pydantic para validar los datos de entrada en FastAPI
 class ConsultaFAQRequest(BaseModel):
     tipoConsulta: str
 
 class ConsultaPlanRequest(BaseModel):
     clienteId: str
+
+# Configuración oficial del cliente de OpenAI para Python
+client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # --- Ruta 1: FAQs Genéricas (Solo IA) ---
 @app.post("/api/soporte/faqs")
@@ -1518,10 +1517,7 @@ async def soporte_faqs(req: ConsultaFAQRequest):
 @app.post("/api/soporte/verificar-plan")
 async def verificar_plan(req: ConsultaPlanRequest):
     try:
-        # 1. CONSULTAR BASE DE DATOS (CONCEPTUAL)
-        # Aquí harías tu consulta real a PostgreSQL/SQLite/MongoDB usando req.clienteId
-        
-        # Datos simulados del cliente en formato Python (Diccionario)
+        # Datos simulados del cliente (aquí conectarás tu base de datos real posteriormente)
         datos_consumo_real = {
             "planActivo": "Empresarial Pro",
             "horasTotalesMes": 20,
@@ -1533,25 +1529,22 @@ async def verificar_plan(req: ConsultaPlanRequest):
 
         porcentaje_horas = int((datos_consumo_real["horasConsumidas"] / datos_consumo_real["horasTotalesMes"]) * 100)
 
-        # 2. ENVIAR DATOS A OPENAI PARA REDACTAR RESPUESTA
-        prompt = f"""
-            El cliente con ID {req.clienteId} ha solicitado información sobre el estado de su plan actual ({datos_consumo_real['planActivo']}).
-            
-            Datos de consumo actuales:
-            - Límite de horas mensuales: {datos_consumo_real['horasTotalesMes']}
-            - Horas consumidas: {datos_consumo_real['horasConsumidas']} ({porcentaje_horas}% utilizado)
-            - Tokens de escáner disponibles: {datos_consumo_real['tokensDisponiblesScanners']}
-            - Tokens de escáner usados: {datos_consumo_real['tokensUsadosScanners']}
-            - Fecha de renovación del ciclo: {datos_consumo_real['fechaRenovacion']}
-
-            Basado en estos datos, el cliente tiene acceso a todas las funciones de su plan, pero está muy cerca del límite de horas contratadas.
-            
-            Redacta una respuesta concisa, clara y profesional en español que:
-            1. Le explique amablemente cómo va su consumo actual.
-            2. Especifique a qué tiene acceso.
-            3. Le indique con tacto qué sucederá si llega al límite antes de la fecha de renovación.
-            4. Mantenga un tono de ayuda y soporte técnico proactivo.
-        """
+        # Prompt estructurado para OpenAI
+        prompt = (
+            f"El cliente con ID {req.clienteId} ha solicitado información sobre el estado de su plan actual ({datos_consumo_real['planActivo']}).\n\n"
+            f"Datos de consumo actuales:\n"
+            f"- Límite de horas mensuales: {datos_consumo_real['horasTotalesMes']}\n"
+            f"- Horas consumidas: {datos_consumo_real['horasConsumidas']} ({porcentaje_horas}% utilizado)\n"
+            f"- Tokens de escáner disponibles: {datos_consumo_real['tokensDisponiblesScanners']}\n"
+            f"- Tokens de escáner usados: {datos_consumo_real['tokensUsadosScanners']}\n"
+            f"- Fecha de renovación del ciclo: {datos_consumo_real['fechaRenovacion']}\n\n"
+            f"Basado en estos datos, el cliente tiene acceso a todas las funciones de su plan, pero está muy cerca del límite de horas contratadas.\n\n"
+            f"Redacta una respuesta concisa, clara y profesional en español que:\n"
+            f"1. Le explique amablemente cómo va su consumo actual.\n"
+            f"2. Especifique a qué tiene acceso.\n"
+            f"3. Le indique con tacto qué sucederá si llega al límite antes de la fecha de renovación.\n"
+            f"4. Mantenga un tono de ayuda y soporte técnico proactivo."
+        )
 
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -1560,7 +1553,7 @@ async def verificar_plan(req: ConsultaPlanRequest):
                 {"role": "user", content: prompt}
             ],
             temperature=0.3
-        ]
+        )
 
         respuesta_redactada = completion.choices[0].message.content
 
