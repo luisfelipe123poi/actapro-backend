@@ -1490,27 +1490,28 @@ app.post('/api/soporte/faqs', async (req, res) => {
             model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "Eres un asistente de soporte técnico de ActaProCore. Responde amablemente al usuario." },
-                { role: "user", content: `Explica brevemente esto: ${contextos[tipoConsulta]}` }
+                { role: "user", content: `Explica brevemente esto: ${contextos[tipoConsulta] || "Consulta general sobre el sistema."}` }
             ],
         });
 
         res.json({ respuesta: completion.choices[0].message.content });
     } catch (error) {
-        res.status(500).json({ error: "Error interno" });
+        console.error("Error en FAQs:", error);
+        res.status(500).json({ error: "Error interno al procesar consulta" });
     }
 });
 
 // --- Ruta 2: VERIFICACIÓN CRÍTICA DE PLAN (DB + IA) ---
 app.post('/api/soporte/verificar-plan', async (req, res) => {
-    const { clienteId, tipoProblema } = req.body;
+    const { clienteId } = req.body; // Se mantiene el tipoProblema por si se necesita luego
 
     try {
-        // 1. CONSULTAR BASE DE DATOS (CONCEPTUAL)
-        // Debes buscar en tu tabla de suscripciones/consumo
-        // Ejemplo: const consumo = await db.query('SELECT * FROM consumos WHERE cliente_id = ?', [clienteId]);
-        // Ejemplo: const plan = await db.query('SELECT * FROM planes WHERE cliente_id = ?', [clienteId]);
-        
-        // DATOS SIMULADOS DEL CLIENTE (Esto vendría de tu DB)
+        // 1. CONSULTAR BASE DE DATOS (CONCEPTUAL - Ejem: PostgreSQL/Mongoose)
+        // Ejemplo usando Mongoose (MongoDB):
+        // const usuario = await Usuario.findById(clienteId).populate('plan consumo');
+        // if (!usuario) return res.status(404).json({ error: "Cliente no encontrado" });
+
+        // DATOS SIMULADOS DEL CLIENTE (Reemplazar con datos reales de DB)
         const datosConsumoReal = {
             planActivo: "Empresarial Pro",
             horasTotalesMes: 20,
@@ -1520,15 +1521,60 @@ app.post('/api/soporte/verificar-plan', async (req, res) => {
             fechaRenovacion: "01/11/2024"
         };
 
+        // Cálculo de porcentajes para el prompt
+        const porcentajeHoras = ((datosConsumoReal.horasConsumidas / datosConsumoReal.horasTotalesMes) * 100).toFixed(0);
+
         // 2. ENVIAR DATOS A OPENAI PARA REDACTAR RESPUESTA
         const prompt = `
-            El cliente ${clienteId} reporta fallas en su plan${datosConsumoReal.planActivo}.
-            Aquí están los datos de consumo actuales:
+            El cliente con ID ${clienteId} ha solicitado información sobre el estado de su plan actual (${datosConsumoReal.planActivo}).
+            
+            Datos de consumo actuales:
             - Límite de horas mensuales: ${datosConsumoReal.horasTotalesMes}
-            - Horas consumidas: ${datosConsumoReal.horasConsumidas} (${(datosConsumoReal.horasConsumidas / datosConsumoReal.horasTotalesMes * 100).toFixed(0)}% utilizado)
+            - Horas consumidas: ${datosConsumoReal.horasConsumidas} (${porcentajeHoras}% utilizado)
             - Tokens de escáner disponibles: ${datosConsumoReal.tokensDisponiblesScanners}
-            - Tokens de escáner usados: ${datosConsumoReal.tokensUsadosScanners} (${(datosConsumoReal.tokensUsadosScanners / datosConsumoReal.tokensDisponiblesScanners * 100).toFixed(0)}% utilizado)
-            - Fecha de renovación: ${datosConsumoReal.fechaRenovacion}
+            - Tokens de escáner usados: ${datosConsumoReal.tokensUsadosScanners}
+            - Fecha de renovación del ciclo: ${datosConsumoReal.fechaRenovacion}
 
-            Basado en estos datos, el cliente tiene acceso a todo su plan, pero está muy cerca del límite de horas. 
-            Redacta una
+            Basado en estos datos, el cliente tiene acceso a todas las funciones de su plan, pero está muy cerca del límite de horas contratadas.
+            
+            Redacta una respuesta concisa, clara y profesional en español que:
+            1. Le explique amablemente cómo va su consumo actual.
+            2. Especifique a qué tiene acceso.
+            3. Le indique con tacto qué sucederá si llega al límite antes de la fecha de renovación.
+            4. Mantenga un tono de ayuda y soporte técnico proactivo.
+        `;
+
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "Eres el sistema automatizado de soporte y control de planes de ActaProCore. Tu trabajo es informar al cliente sobre su estado de cuenta con precisión y amabilidad." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3 // Más bajo para mayor precisión con datos
+        });
+
+        const respuestaRedactada = completion.choices[0].message.content;
+
+        // 3. Enviar respuesta al frontend
+        res.json({ 
+            respuesta: respuestaRedactada,
+            datosConsumo: datosConsumoReal // Opcional: enviar datos crudos al cliente
+        });
+
+    } catch (error) {
+        console.error("Error crítico en verificación de plan:", error);
+        res.status(500).json({ error: "Error interno del servidor al verificar el plan" });
+    }
+});
+
+// Exportar la app para usarla en tu archivo principal de servidor
+export default app;
+
+// Si este archivo se ejecuta directamente, iniciar el servidor:
+// (Comenta esto si tienes un archivo 'server.js' que importa 'app.js')
+/*
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Servidor de soporte corriendo en puerto ${PORT}`);
+});
+*/
