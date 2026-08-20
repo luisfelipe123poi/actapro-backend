@@ -137,6 +137,36 @@ PRECIOS_PLANES = {
     },
 }
 
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import os
+import openai
+
+# 1. Inicialización obligatoria de FastAPI
+app = FastAPI(title="ActaProCore Soporte API")
+
+# Configuración de CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 2. Configuración oficial del cliente de OpenAI para Python
+client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# 3. Modelos Pydantic para validar los datos de entrada
+class ConsultaFAQRequest(BaseModel):
+    tipoConsulta: str
+
+class ConsultaPlanRequest(BaseModel):
+    clienteId: str
+    tipoProblema: str = None
+
+
 
 class AuthModel(BaseModel):
   email: str
@@ -1475,34 +1505,6 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import os
-import openai
-
-# 1. Inicialización obligatoria de FastAPI
-app = FastAPI(title="ActaProCore Soporte API")
-
-# Configuración de CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 2. Configuración oficial del cliente de OpenAI para Python
-client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-# 3. Modelos Pydantic para validar los datos de entrada
-class ConsultaFAQRequest(BaseModel):
-    tipoConsulta: str
-
-class ConsultaPlanRequest(BaseModel):
-    clienteId: str
-    tipoProblema: str = None
 
 # --- Ruta 1: FAQs Genéricas (Solo IA) ---
 @app.post("/api/soporte/faqs")
