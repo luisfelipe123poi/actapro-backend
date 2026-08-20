@@ -1170,7 +1170,7 @@ async def descargar_acta_pdf(acta_id: str, email: str):
         headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
     )
 
-from datetime import datetime
+
 from bson import ObjectId
 from fastapi import HTTPException
 from pydantic import BaseModel
