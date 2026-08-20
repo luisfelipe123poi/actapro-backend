@@ -1480,6 +1480,10 @@ from pydantic import BaseModel
 import os
 import openai
 
+
+
+app = FastAPI()
+
 # Modelos Pydantic para validar los datos de entrada en FastAPI
 class ConsultaFAQRequest(BaseModel):
     tipoConsulta: str
