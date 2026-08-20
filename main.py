@@ -1474,3 +1474,61 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
+
+// --- Ruta 1: FAQs Genéricas (Solo IA) ---
+app.post('/api/soporte/faqs', async (req, res) => {
+    const { tipoConsulta } = req.body;
+
+    // Definimos respuestas base para la IA según el tipo
+    const contextos = {
+        audio: "El usuario pregunta cómo transcribir. Pasos: Ir a Consola Inteligente -> Subir archivo (.mp3/.wav) -> Clic en Generar Acta.",
+        scanner: "El usuario pregunta cómo usar el escáner. Pasos: Ir a Módulo Pro -> Subir documento (PDF/Img) -> Clic en Iniciar Escaneo IA.",
+    };
+
+    try {
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "Eres un asistente de soporte técnico de ActaProCore. Responde amablemente al usuario." },
+                { role: "user", content: `Explica brevemente esto: ${contextos[tipoConsulta]}` }
+            ],
+        });
+
+        res.json({ respuesta: completion.choices[0].message.content });
+    } catch (error) {
+        res.status(500).json({ error: "Error interno" });
+    }
+});
+
+// --- Ruta 2: VERIFICACIÓN CRÍTICA DE PLAN (DB + IA) ---
+app.post('/api/soporte/verificar-plan', async (req, res) => {
+    const { clienteId, tipoProblema } = req.body;
+
+    try {
+        // 1. CONSULTAR BASE DE DATOS (CONCEPTUAL)
+        // Debes buscar en tu tabla de suscripciones/consumo
+        // Ejemplo: const consumo = await db.query('SELECT * FROM consumos WHERE cliente_id = ?', [clienteId]);
+        // Ejemplo: const plan = await db.query('SELECT * FROM planes WHERE cliente_id = ?', [clienteId]);
+        
+        // DATOS SIMULADOS DEL CLIENTE (Esto vendría de tu DB)
+        const datosConsumoReal = {
+            planActivo: "Empresarial Pro",
+            horasTotalesMes: 20,
+            horasConsumidas: 19.5, // ¡Casi al límite!
+            tokensDisponiblesScanners: 5000,
+            tokensUsadosScanners: 4800,
+            fechaRenovacion: "01/11/2024"
+        };
+
+        // 2. ENVIAR DATOS A OPENAI PARA REDACTAR RESPUESTA
+        const prompt = `
+            El cliente ${clienteId} reporta fallas en su plan${datosConsumoReal.planActivo}.
+            Aquí están los datos de consumo actuales:
+            - Límite de horas mensuales: ${datosConsumoReal.horasTotalesMes}
+            - Horas consumidas: ${datosConsumoReal.horasConsumidas} (${(datosConsumoReal.horasConsumidas / datosConsumoReal.horasTotalesMes * 100).toFixed(0)}% utilizado)
+            - Tokens de escáner disponibles: ${datosConsumoReal.tokensDisponiblesScanners}
+            - Tokens de escáner usados: ${datosConsumoReal.tokensUsadosScanners} (${(datosConsumoReal.tokensUsadosScanners / datosConsumoReal.tokensDisponiblesScanners * 100).toFixed(0)}% utilizado)
+            - Fecha de renovación: ${datosConsumoReal.fechaRenovacion}
+
+            Basado en estos datos, el cliente tiene acceso a todo su plan, pero está muy cerca del límite de horas. 
+            Redacta una
