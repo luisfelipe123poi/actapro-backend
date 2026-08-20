@@ -1484,17 +1484,12 @@ import openai
 # 1. Inicialización obligatoria de FastAPI
 app = FastAPI(title="ActaProCore Soporte API")
 
-# Configuración de CORS crítica para permitir peticiones desde tu frontend hacia Render
+# Configuración de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://actaprocore.com",
-        "https://www.actaprocore.com",
-        "http://127.0.0.1:5500",  # Útil si pruebas localmente en desarrollo
-        "http://localhost:5500"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Permite POST, GET, OPTIONS, etc.
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -1524,7 +1519,7 @@ async def soporte_faqs(req: ConsultaFAQRequest):
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Eres un asistente de soporte técnico de ActaProCore. Responde amablemente al usuario."},
-                {"role": "user", content: f"Explica brevemente esto: {contexto_texto}"}
+                {"role": "user", "content": f"Explica brevemente esto: {contexto_texto}"}  # <--- CORREGIDO AQUÍ (añadidas las comillas en "content")
             ]
         )
         return {"respuesta": completion.choices[0].message.content}
@@ -1536,7 +1531,6 @@ async def soporte_faqs(req: ConsultaFAQRequest):
 @app.post("/api/soporte/verificar-plan")
 async def verificar_plan(req: ConsultaPlanRequest):
     try:
-        # Datos simulados del cliente
         datos_consumo_real = {
             "planActivo": "Empresarial Pro",
             "horasTotalesMes": 20,
@@ -1568,7 +1562,7 @@ async def verificar_plan(req: ConsultaPlanRequest):
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Eres el sistema automatizado de soporte y control de planes de ActaProCore. Tu trabajo es informar al cliente sobre su estado de cuenta con precisión y amabilidad."},
-                {"role": "user", content: prompt}
+                {"role": "user", "content": prompt}  # <--- CORREGIDO AQUÍ (añadidas las comillas en "content")
             ],
             temperature=0.3
         )
