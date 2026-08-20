@@ -747,7 +747,7 @@ async def procesar_asamblea(
                 "file_hash": file_hash,
                 "filename": file.filename,
                 "texto_transcrito": texto_transcrito,
-                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "createdAt": datetime.datetime.utcnow(),
             })
 
