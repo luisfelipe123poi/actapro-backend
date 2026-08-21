@@ -1551,3 +1551,21 @@ async def verificar_plan(req: ConsultaPlanRequest):
             "fechaRenovacion": "01/10/2026"
         }
     }
+
+// Endpoint para recibir formularios de contacto personalizados
+app.post('/api/contacto-enterprise', async (req, res) => {
+    try {
+        const { nombre, email, empresa, mensaje } = req.body;
+        
+        // Aquí puedes integrar lógica para guardar en BD o enviar un correo
+        console.log("Nueva solicitud Enterprise:", { nombre, email, empresa, mensaje });
+
+        // Simulamos una respuesta exitosa
+        res.status(200).json({ 
+            success: true, 
+            message: "Gracias por contactarnos, nuestro equipo comercial se comunicará pronto." 
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Error al procesar la solicitud." });
+    }
+});
