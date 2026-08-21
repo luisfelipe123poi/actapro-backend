@@ -1506,25 +1506,23 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
 
 
-# --- Ruta 1: FAQs Preestablecidas con Video ---
+# --- Ruta 1: FAQs Preestablecidas con Cloudinary ---
 @app.post("/api/soporte/faqs")
 async def soporte_faqs(req: ConsultaFAQRequest):
-    # Diccionario con respuestas fijas y su respectivo video de ayuda
     faqs_data = {
         "audio": {
-            "respuesta": "Para transcribir un audio, ve a '+ Transcribe audios', sube tu archivo en formato .mp3 o .wav y haz clic en 'Generar Acta'. El sistema procesará el texto automáticamente.",
-            "videoUrl": "https://drive.google.com/file/d/1MoaH4wPmTQfBuSQsC3C9-p5w6UuYSukY/preview"
+            "respuesta": "Para transcribir un audio, ve a '+ Transcribe audios', sube tu archivo en formato .mp3 o .wav y haz clic en 'Generar Acta'.",
+            "videoUrl": "https://res.cloudinary.com/iuu7h8rj/video/upload/v1787281142/transcripcion_por_audio.mp4"
         },
         "scanner": {
-            "respuesta": "Para usar el escáner de documentos, dirígete al '+ Escanea y transcribe doc.', sube tu archivo en PDF o imagen clara, y presiona el botón 'Iniciar Escaneo IA'.",
-            "videoUrl": "https://drive.google.com/file/d/1ONEoZImA4RFFWP5c440uhdF3uLpOzvGR/preview"
+            "respuesta": "Para usar el escáner de documentos, dirígete al '+ Escanea y transcribe doc.', sube tu archivo en PDF o imagen clara.",
+            "videoUrl": "https://res.cloudinary.com/iuu7h8rj/video/upload/v1787281146/scanner_de_documento.mp4"
         }
     }
     
-    # Respuesta por defecto si el tipo no coincide
     resultado = faqs_data.get(req.tipoConsulta, {
-        "respuesta": "Puedes explorar nuestras guías generales en el menú principal o contactar con un asesor humano si necesitas asistencia personalizada.",
-        "videoUrl": "https://assets.mixkit.co/videos/preview/mixkit-digital-animation-of-screens-with-code-31910-large.mp4"
+        "respuesta": "Puedes explorar nuestras guías generales en el menú principal.",
+        "videoUrl": "https://res.cloudinary.com/TU_CLOUD_NAME/video/upload/v123456789/video_default.mp4"
     })
 
     return resultado
