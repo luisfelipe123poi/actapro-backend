@@ -1914,3 +1914,29 @@ def obtener_estadisticas_licencias():
 
 # Incluirlo en la aplicación principal
 app.include_router(crm_router)
+
+from fastapi import APIRouter
+
+# Crear el router con el prefijo /api/crm que busca tu frontend
+crm_router = APIRouter(prefix="/api/crm", tags=["CRM"])
+
+@crm_router.get("/license-stats")
+def get_license_stats():
+    # Aquí puedes conectar con tus colecciones de MongoDB para devolver datos reales
+    # Por ahora, devolvemos una estructura base para que el frontend no falle:
+    return {
+        "success": True,
+        "total_usuarios": users_collection.count_documents({}),
+        "licencias_activas": 0,
+        "estadisticas": {}
+    }
+
+@crm_router.get("/license-stats-advanced")
+def get_license_stats_advanced():
+    return {
+        "success": True,
+        "advanced_stats": []
+    }
+
+# Registrar el router en la aplicación principal de FastAPI
+app.include_router(crm_router)
