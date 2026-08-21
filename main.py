@@ -1629,7 +1629,8 @@ async def obtener_cotizaciones():
 
 # Ejemplo para añadir a tu main.py o routes.py
 from fastapi import APIRouter
-from your_db_module import db # Importa tu instancia de base de datos
+# Ejemplo si usas un archivo database.py o db.py
+from database import db
 
 router = APIRouter()
 
