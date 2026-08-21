@@ -52,7 +52,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 load_dotenv()
-
+app.include_router(crm_router)
 app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.5")
 
 app.add_middleware(
