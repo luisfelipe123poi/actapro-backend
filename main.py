@@ -1896,3 +1896,21 @@ async def descargar_factura_pdf(email: str):
             "estado": "Pagado vía Mercado Pago"
         }
     }
+
+from fastapi import APIRouter
+
+# Puedes crear un router local o agregarlo directo a app
+crm_router = APIRouter(prefix="/api/crm", tags=["CRM"])
+
+@crm_router.get("/license-stats")
+def obtener_estadisticas_licencias():
+    # Lógica para calcular o extraer las estadísticas de tu base de datos
+    return {
+        "status": "success",
+        "total_licencias": 0,
+        "activas": 0,
+        "expiradas": 0
+    }
+
+# Incluirlo en la aplicación principal
+app.include_router(crm_router)
