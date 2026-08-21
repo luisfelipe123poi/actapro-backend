@@ -1605,11 +1605,10 @@ async def recibir_contacto_enterprise(datos: ContactoEnterprise):
 @app.get("/api/admin/cotizaciones")
 async def obtener_cotizaciones():
     try:
-        # Consultamos todas las cotizaciones ordenadas de la más reciente a la más antigua
-        cursor = db.cotizaciones.find().sort("fecha", -1)
-        cotizaciones_db = await cursor.to_list(length=1000)
+        # CORRECCIÓN: Sin 'await' porque PyMongo es síncrono
+        cotizaciones_db = list(db.cotizaciones.find().sort("fecha", -1).limit(1000))
         
-        # Transformamos el ObjectId de MongoDB a string (_id -> string) para evitar errores en JSON
+        # Transformamos el ObjectId de MongoDB a string
         lista_leads = []
         for c in cotizaciones_db:
             c["_id"] = str(c["_id"])
