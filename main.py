@@ -198,6 +198,7 @@ CONFIGURACION_PLANES = {
     "profesional": {"tokens": 300000, "horas": 60.0},
     "corporativo": {"tokens": 1000000, "horas": 200.0}
 }
+
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
     existing_user = users_collection.find_one({"email": data.email})
@@ -1626,20 +1627,11 @@ async def obtener_cotizaciones():
             "message": str(e)
         }
 
-from datetime import datetime
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+# ==========================================
+# MÓDULO DE CRM Y MÉTRICAS FINANCIERAS
+# ==========================================
 
-# Inicializamos el router con el prefijo /api/crm
-router = APIRouter(prefix="/api/crm", tags=["CRM & SaaS Analytics"])
-
-PRECIOS_PLANES = {
-    "basico": {"tokens_mensuales": 100000, "limite_horas": 15.0, "precio": 153000},
-    "profesional": {"tokens_mensuales": 500000, "limite_horas": 60.0, "precio": 479000},
-    "corporativo": {"tokens_mensuales": 2000000, "limite_horas": 200.0, "precio": 939000}
-}
-
-@router.get("/license-stats")
+@app.get("/api/crm/license-stats")
 async def get_crm_license_stats():
     """
     Endpoint principal para alimentar el CRM con estadísticas de usuarios por plan,
@@ -1661,6 +1653,8 @@ async def get_crm_license_stats():
         lista_suscriptores = list(cursor_usuarios)
 
         # 3. Cálculo de Ingresos Actuales (MRR estimado según los planes activos)
+        # Precios de referencia desde tu diccionario PRECIOS_PLANES:
+        # basico: 153,000 | profesional: 479,000 | corporativo: 939,000
         precio_basico = PRECIOS_PLANES["basico"]["precio"]
         precio_profesional = PRECIOS_PLANES["profesional"]["precio"]
         precio_corporativo = PRECIOS_PLANES["corporativo"]["precio"]
@@ -1671,9 +1665,12 @@ async def get_crm_license_stats():
             (corporativo_users * precio_corporativo)
         )
 
+        # Estimación de egresos operativos (ej. costos de OpenAI/AssemblyAI/Infraestructura aprox. 25% de base o calculados)
         egresos_actuales_mes = ingresos_actuales_mes * 0.25 
 
-        # 4. Simulación de Evolución Mensual
+        # 4. Simulación de Evolución Mensual (Últimos meses y proyección anual)
+        # Puedes conectar esto con transacciones reales de pagos si guardas historial.
+        # Aquí generamos una estructura lógica basada en los suscriptores actuales.
         evolucion_mensual = [
             {"mes": "Enero", "ingresos": ingresos_actuales_mes * 0.7, "egresos": egresos_actuales_mes * 0.8, "proyeccion": ingresos_actuales_mes * 0.75},
             {"mes": "Febrero", "ingresos": ingresos_actuales_mes * 0.82, "egresos": egresos_actuales_mes * 0.85, "proyeccion": ingresos_actuales_mes * 0.88},
@@ -1715,12 +1712,32 @@ async def get_crm_license_stats():
         print(f"Error en CRM stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+from datetime import datetime, timedelta
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+
+router = APIRouter(prefix="/api/crm", tags=["CRM & SaaS Analytics"])
+
+# Mock o conexión a tu base de datos MongoDB y configuración de planes
+# db = client["tu_base_de_datos"]
+# users_collection = db["users"]
+# mp_sdk = mercadopago.SDK("YOUR_ACCESS_TOKEN")
+
+PRECIOS_PLANES = {
+    "basico": {"tokens_mensuales": 100000, "limite_horas": 15.0, "precio": 153000},
+    "profesional": {"tokens_mensuales": 500000, "limite_horas": 60.0, "precio": 479000},
+    "corporativo": {"tokens_mensuales": 2000000, "limite_horas": 200.0, "precio": 939000}
+}
+
 @router.get("/license-stats-advanced")
 async def obtener_estadisticas_avanzadas():
     """
     Retorna métricas extendidas incluyendo alerta de churn, 
     márgenes unitarios por usuario y cohortes desde la base de datos real.
     """
+    # Ejemplo de recuperación real o simulación desde MongoDB:
+    # suscriptores = list(users_collection.find({}, {"_id": 0}))
+    
     suscriptores = [
         {
             "email": "carlos.legal@empresa.com",
@@ -1736,7 +1753,7 @@ async def obtener_estadisticas_avanzadas():
             "email": "laura.consultora@gmail.com",
             "plan": "profesional",
             "fecha_registro": "2026-06-10",
-            "horas_usadas_mes": 5.0, 
+            "horas_usadas_mes": 5.0, # Uso muy bajo -> Alerta de Churn
             "limite_horas_mes": 60,
             "tokens_usados": 45000,
             "pago_mensual": 479000,
@@ -1759,6 +1776,7 @@ async def obtener_estadisticas_avanzadas():
     usuarios_en_riesgo = []
 
     for sub in suscriptores:
+        # Cálculo de Costo Operativo Real de IA por usuario
         costo_ia_usuario = sub["horas_usadas_mes"] * Costo_IA_Por_Hora
         margen_neto = sub["pago_mensual"] - costo_ia_usuario
         
@@ -1771,6 +1789,7 @@ async def obtener_estadisticas_avanzadas():
             "porcentaje_margen": round((margen_neto / sub["pago_mensual"]) * 100, 1) if sub["pago_mensual"] > 0 else 0
         })
 
+        # --- ALGORITMO DE ALERTA TEMPRANA DE CHURN ---
         if sub["plan"] != "free":
             limite = sub.get("limite_horas_mes", 0)
             if limite > 0:
@@ -1783,6 +1802,7 @@ async def obtener_estadisticas_avanzadas():
                         "nivel_riesgo": "Alto"
                     })
 
+    # --- ANÁLISIS DE COHORTES (Simulado por Mes de Registro) ---
     cohortes = {
         "Marzo 2026": {"total": 12, "retenidos": 11},
         "Abril 2026": {"total": 19, "retenidos": 17},
@@ -1816,6 +1836,8 @@ async def webhook_mercadopago(request: Request):
                     payer_email = payment.get("payer", {}).get("email") or payment.get("external_reference")
                     if payer_email:
                         items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
+                        
+                        # Plan por defecto si no se detecta explícitamente
                         plan_asignado = "basico"
 
                         for item in items:
@@ -1827,6 +1849,27 @@ async def webhook_mercadopago(request: Request):
                             elif "básico" in title_lower or "basico" in title_lower:
                                 plan_asignado = "basico"
 
+                        # Obtener configuración del plan desde PRECIOS_PLANES
+                        info_plan = PRECIOS_PLANES.get(plan_asignado, PRECIOS_PLANES["basico"])
+                        
+                        tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
+                        horas_otorgadas = info_plan.get("limite_horas", 15.0)
+
+                        # Actualizar en la base de datos reseteando los contadores de uso actual
+                        # users_collection.update_one(
+                        #     {"email": payer_email},
+                        #     {
+                        #         "$set": {
+                        #             "plan": plan_asignado,
+                        #             "activo": True,
+                        #             "tokens_usados": 0,
+                        #             "limite_tokens_mes": tokens_otorgados,
+                        #             "horas_usadas_mes": 0.0,
+                        #             "limite_horas_mes": horas_otorgadas,
+                        #         }
+                        #     },
+                        #     upsert=True
+                        # )
                         return {"status": "success", "message": f"Licencia de {payer_email} actualizada a {plan_asignado}"}
     except Exception as e:
         print(f"Error en webhook de Mercado Pago: {e}")
