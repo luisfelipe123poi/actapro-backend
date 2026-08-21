@@ -145,6 +145,7 @@ import openai
 
 # 1. Inicialización obligatoria de FastAPI
 app = FastAPI(title="ActaProCore Soporte API")
+app.include_router(crm_router)
 
 # Configuración de CORS
 app.add_middleware(
