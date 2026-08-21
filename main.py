@@ -1552,20 +1552,28 @@ async def verificar_plan(req: ConsultaPlanRequest):
         }
     }
 
-// Endpoint para recibir formularios de contacto personalizados
-app.post('/api/contacto-enterprise', async (req, res) => {
-    try {
-        const { nombre, email, empresa, mensaje } = req.body;
-        
-        // Aquí puedes integrar lógica para guardar en BD o enviar un correo
-        console.log("Nueva solicitud Enterprise:", { nombre, email, empresa, mensaje });
+from pydantic import BaseModel
 
-        // Simulamos una respuesta exitosa
-        res.status(200).json({ 
-            success: true, 
-            message: "Gracias por contactarnos, nuestro equipo comercial se comunicará pronto." 
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, message: "Error al procesar la solicitud." });
-    }
-});
+# Modelo de datos para validar la solicitud de contacto Enterprise
+class ContactoEnterprise(BaseModel.model_config = None # o usa BaseModel estándar)
+class ContactoEnterprise(BaseModel):
+    nombre: str
+    email: str
+    empresa: str = None
+    mensaje: str
+
+@app.post("/api/contacto-enterprise")
+async def recibir_contacto_enterprise(datos: ContactoEnterprise):
+    try:
+        # Aquí puedes procesar los datos (guardar en base de datos, enviar correo, etc.)
+        print(f"Nueva solicitud Enterprise recibida: {datos.dict()}")
+        
+        return {
+            "success": True, 
+            "message": "¡Gracias por contactarnos! Un gerente de cuenta se comunicará contigo pronto."
+        }
+    except Exception as e:
+        return {
+            "success": False, 
+            "message": str(e)
+        }
