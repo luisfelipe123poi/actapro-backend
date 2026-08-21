@@ -1933,10 +1933,37 @@ def get_license_stats():
 
 @crm_router.get("/license-stats-advanced")
 def get_license_stats_advanced():
-    return {
-        "success": True,
-        "advanced_stats": []
-    }
-
-# Registrar el router en la aplicación principal de FastAPI
-app.include_router(crm_router)
+    try:
+        # Puedes extraer los datos reales de tu base de datos (users_collection, actas_collection, etc.)
+        # Aquí te dejamos la estructura exacta que tu frontend (JavaScript) está exigiendo:
+        
+        return {
+            "success": True,
+            "churn_alerts": [
+                # Ejemplo de estructura si quisieras mostrar alertas reales o dejarlo vacío []
+                # {
+                #     "email": "usuario@ejemplo.com",
+                #     "plan": "basico",
+                #     "razon": "Inactividad prolongada",
+                #     "nivel_riesgo": "Alto"
+                # }
+            ],
+            "cohortes": {
+                # Ejemplo de estructura de cohortes por mes:
+                # "2026-01": {"total": 10, "retenidos": 8},
+                # "2026-02": {"total": 15, "retenidos": 12}
+            },
+            "unit_economics": [
+                # Ejemplo de estructura para unit economics:
+                # {
+                #     "email": "usuario@ejemplo.com",
+                #     "plan": "profesional",
+                #     "ingreso": 479000.0,
+                #     "costo_ia": 50000.0,
+                #     "margen_neto": 429000.0,
+                #     "porcentaje_margen": 89.5
+                # }
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
