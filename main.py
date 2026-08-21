@@ -1912,12 +1912,9 @@ def obtener_estadisticas_licencias():
         "expiradas": 0
     }
 
-# Incluirlo en la aplicación principal
-app.include_router(crm_router)
-
 from fastapi import APIRouter
 
-# Crear el router con el prefijo /api/crm que busca tu frontend
+# 1. Crear el router con el prefijo /api/crm que busca tu frontend
 crm_router = APIRouter(prefix="/api/crm", tags=["CRM"])
 
 @crm_router.get("/license-stats")
@@ -1967,3 +1964,6 @@ def get_license_stats_advanced():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# 2. Incluirlo en la aplicación principal al final de todo
+app.include_router(crm_router)
