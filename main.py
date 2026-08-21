@@ -1102,7 +1102,7 @@ STRICT RULES:
             nuevo_registro = {
                 "email": email,
                 "nombre": file.filename or "Documento Escaneado",
-                "fecha": datetime.utcnow().isoformat(),
+                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "tokens": tokens_consumidos,
                 "contenido": resultado_html
             }
@@ -1506,76 +1506,50 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
 
 
-# --- Ruta 1: FAQs Genéricas (Solo IA) ---
+# --- Ruta 1: FAQs Preestablecidas con Video ---
 @app.post("/api/soporte/faqs")
 async def soporte_faqs(req: ConsultaFAQRequest):
-    contextos = {
-        "audio": "El usuario pregunta cómo transcribir. Pasos: Ir a Consola Inteligente -> Subir archivo (.mp3/.wav) -> Clic en Generar Acta.",
-        "scanner": "El usuario pregunta cómo usar el escáner. Pasos: Ir a Módulo Pro -> Subir documento (PDF/Img) -> Clic en Iniciar Escaneo IA.",
+    # Diccionario con respuestas fijas y su respectivo video de ayuda
+    faqs_data = {
+        "audio": {
+            "respuesta": "Para transcribir un audio, ve a la '+ Trancribe audios', sube tu archivo en formato .mp3 o .wav y haz clic en 'Generar Acta'. El sistema procesará el texto automáticamente.VE EL VIDEO",
+            "videoUrl": "https://assets.mixkit.co/videos/preview/mixkit-software-developer-working-in-an-office-43098-large.mp4" # Reemplaza con tu video real
+        },
+        "scanner": {
+            "respuesta": "Para usar el escáner de documentos, dirígete al '+ Escanea y trancribe doc.', sube tu archivo en PDF o imagen clara, y presiona el botón 'Iniciar Escaneo IA' para extraer toda la información.",
+            "videoUrl": "https://assets.mixkit.co/videos/preview/mixkit-hands-typing-on-a-laptop-keyboard-43099-large.mp4" # Reemplaza con tu video real
+        }
     }
     
-    contexto_texto = contextos.get(req.tipoConsulta, "Consulta general sobre el sistema.")
+    # Respuesta por defecto si el tipo no coincide
+    resultado = faqs_data.get(req.tipoConsulta, {
+        "respuesta": "Puedes explorar nuestras guías generales en el menú principal o contactar con un asesor humano si necesitas asistencia personalizada.",
+        "videoUrl": "https://assets.mixkit.co/videos/preview/mixkit-digital-animation-of-screens-with-code-31910-large.mp4"
+    })
 
-    try:
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Eres un asistente de soporte técnico de ActaProCore. Responde amablemente al usuario."},
-                {"role": "user", "content": f"Explica brevemente esto: {contexto_texto}"}  # <--- CORREGIDO AQUÍ (añadidas las comillas en "content")
-            ]
-        )
-        return {"respuesta": completion.choices[0].message.content}
-    except Exception as e:
-        print(f"Error en FAQs: {e}")
-        raise HTTPException(status_code=500, detail="Error interno al procesar consulta")
+    return resultado
 
-# --- Ruta 2: VERIFICACIÓN CRÍTICA DE PLAN (DB + IA) ---
+# --- Ruta 2: Verificación de Plan Preestablecida con Video ---
 @app.post("/api/soporte/verificar-plan")
 async def verificar_plan(req: ConsultaPlanRequest):
-    try:
-        datos_consumo_real = {
+    # Simulación de consulta a base de datos usando el correo
+    # Aquí puedes conectar tu lógica real de base de datos para buscar el plan del usuario por su `req.email`
+    
+    respuesta_plan = (
+        f"Hola. Hemos verificado el correo '{req.email}'. "
+        f"Actualmente te encuentras en el plan **Empresarial Pro** con 18.5 horas consumidas de tu límite mensual. "
+        f"Tu cuenta está activa y tienes acceso completo a todas las funciones avanzadas y escáneres hasta tu fecha de renovación."
+    )
+    
+    video_plan = "https://assets.mixkit.co/videos/preview/mixkit-data-flow-plexus-background-animation-2679-large.mp4" # Video explicativo del plan
+
+    return {
+        "respuesta": respuesta_plan,
+        "videoUrl": video_plan,
+        "datosConsumo": {
             "planActivo": "Empresarial Pro",
             "horasTotalesMes": 20,
-            "horasConsumidas": 19.5,
-            "tokensDisponiblesScanners": 5000,
-            "tokensUsadosScanners": 4800,
-            "fechaRenovacion": "01/11/2026"
+            "horasConsumidas": 18.5,
+            "fechaRenovacion": "01/10/2026"
         }
-
-        porcentaje_horas = int((datos_consumo_real["horasConsumidas"] / datos_consumo_real["horasTotalesMes"]) * 100)
-
-        prompt = (
-            f"El cliente con ID {req.clienteId} ha solicitado información sobre el estado de su plan actual ({datos_consumo_real['planActivo']}).\n\n"
-            f"Datos de consumo actuales:\n"
-            f"- Límite de horas mensuales: {datos_consumo_real['horasTotalesMes']}\n"
-            f"- Horas consumidas: {datos_consumo_real['horasConsumidas']} ({porcentaje_horas}% utilizado)\n"
-            f"- Tokens de escáner disponibles: {datos_consumo_real['tokensDisponiblesScanners']}\n"
-            f"- Tokens de escáner usados: {datos_consumo_real['tokensUsadosScanners']}\n"
-            f"- Fecha de renovación del ciclo: {datos_consumo_real['fechaRenovacion']}\n\n"
-            f"Basado en estos datos, el cliente tiene acceso a todas las funciones de su plan, pero está muy cerca del límite de horas contratadas.\n\n"
-            f"Redacta una respuesta concisa, clara y profesional en español que:\n"
-            f"1. Le explique amablemente cómo va su consumo actual.\n"
-            f"2. Especifique a qué tiene acceso.\n"
-            f"3. Le indique con tacto qué sucederá si llega al límite antes de la fecha de renovación.\n"
-            f"4. Mantenga un tono de ayuda y soporte técnico proactivo."
-        )
-
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Eres el sistema automatizado de soporte y control de planes de ActaProCore. Tu trabajo es informar al cliente sobre su estado de cuenta con precisión y amabilidad."},
-                {"role": "user", "content": prompt}  # <--- CORREGIDO AQUÍ (añadidas las comillas en "content")
-            ],
-            temperature=0.3
-        )
-
-        respuesta_redactada = completion.choices[0].message.content
-
-        return {
-            "respuesta": respuesta_redactada,
-            "datosConsumo": datos_consumo_real
-        }
-
-    except Exception as e:
-        print(f"Error crítico en verificación de plan: {e}")
-        raise HTTPException(status_code=500, detail="Error interno del servidor al verificar el plan")
+    }
