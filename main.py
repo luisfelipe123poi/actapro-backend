@@ -54,6 +54,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 load_dotenv()
 
 app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.5")
+app.include_router(router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -143,9 +144,8 @@ from pydantic import BaseModel
 import os
 import openai
 
-# 1. Inicialización obligatoria de FastAPI
-app = FastAPI(title="ActaProCore Soporte API")
-app.include_router(crm_router)
+
+
 
 # Configuración de CORS
 app.add_middleware(
