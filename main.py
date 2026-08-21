@@ -1583,8 +1583,8 @@ async def recibir_contacto_enterprise(datos: ContactoEnterprise):
         nuevo_lead["fecha"] = datetime.datetime.utcnow().isoformat()
         nuevo_lead["estado"] = "Pendiente"
         
-        # Guardamos en la colección 'cotizaciones' de MongoDB
-        resultado_db = await db.cotizaciones.insert_one(nuevo_lead)
+        # CORRECCIÓN: Quitamos el 'await' porque pymongo es síncrono
+        resultado_db = db.cotizaciones.insert_one(nuevo_lead)
         
         print(f"Nueva solicitud Enterprise guardada con ID: {resultado_db.inserted_id}")
         
