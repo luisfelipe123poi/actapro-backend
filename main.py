@@ -1,28 +1,3 @@
-import datetime 
-import datetime
-import hashlib
-import os
-import shutil
-import uuid
-from typing import Optional
-import assemblyai as aai
-from docx import Document
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
-import mercadopago
-from openai import OpenAI
-from pydantic import BaseModel
-from pymongo import MongoClient
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
-import io
-from bson import ObjectId
-import re
 import datetime
 import hashlib
 import io
@@ -40,6 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 import mercadopago
+import openai
 import pdfplumber
 import pymupdf as fitz
 from openai import OpenAI
@@ -53,8 +29,8 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 load_dotenv()
 
+# --- ÚNICA INSTANCIA OFICIAL DE FASTAPI ---
 app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.5")
-app.include_router(router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,9 +47,9 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
 
 if not AAI_API_KEY or not OPENAI_API_KEY:
-  raise ValueError(
-      "❌ Error: Claves de API de AssemblyAI u OpenAI no configuradas en .env"
-  )
+    raise ValueError(
+        "❌ Error: Claves de API de AssemblyAI u OpenAI no configuradas en .env"
+    )
 
 # Inicializar cliente de MongoDB especificando la base de datos aislada 'actabot_db'
 mongo_client = MongoClient(MONGO_URI)
@@ -85,17 +61,18 @@ scanners_historial_collection = db["scanners_historial"]  # <--- NUEVA COLECCIÓ
 
 # Configurar índice TTL para eliminar automáticamente la caché de transcripciones pasados 30 días (2592000 segundos)
 try:
-  transripciones_collection.create_index(
-      "createdAt", expireAfterSeconds=2592000
-  )
+    transripciones_collection.create_index(
+        "createdAt", expireAfterSeconds=2592000
+    )
 except Exception as e:
-  print(f"Nota sobre índice TTL: {e}")
+    print(f"Nota sobre índice TTL: {e}")
 
-# Inicializar SDK de Mercado Pago
+# Inicializar SDK de Mercado Pago y Clientes de IA
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
 aai.settings.api_key = AAI_API_KEY
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+client = openai_client  # Unificado para evitar duplicidad de instancias OpenAI
 
 # Prompt enfocado en máxima exhaustividad y cero resumen innecesario
 prompt_sistema = """
@@ -111,6 +88,7 @@ ORDEN DE TRABAJO (ESTRICTO):
    - DECISIONES Y VOTACIONES: Registra el sentido de las votaciones y cualquier salvedad o constancia que los copropietarios hayan solicitado dejar por escrito.
 4. ESTILO Y FORMATO: Lenguaje jurídico formal, impersonal y preciso. Utiliza asteriscos dobles (ej: **$1.500.000** o **Aprobado por mayoría**) para resaltar en el texto cifras, costos, valores y decisiones clave. Redacta como si hubieras estado presente tomando nota exhaustiva de todo lo importante.
 """
+
 PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Tu objetivo es redactar un acta formal, jurídica y detallada a partir de la transcripción de la asamblea provista, asegurando un formato profesional en Markdown y cumplimiento legal estricto."""
 
 # Diccionario seguro de precios y planes controlados estrictamente en el backend
@@ -118,79 +96,25 @@ PRECIOS_PLANES = {
     "basico": {
         "nombre": "Plan Básico",
         "precio": 153000.0,
-        "tokens_mensuales": 100000,      # Actualizado a 100k tokens
-        "documentos_estimados": 40,      # Referencia para el usuario
+        "tokens_mensuales": 100000,
+        "documentos_estimados": 40,
         "limite_horas": 15.0
     },
     "profesional": {
-        "nombre": "Plan Intermedio",      # Ajustado a "Intermedio" según tu tabla
+        "nombre": "Plan Intermedio",
         "precio": 479000.0,
-        "tokens_mensuales": 300000,      # Actualizado a 300k tokens
-        "documentos_estimados": 120,     # Referencia para el usuario
+        "tokens_mensuales": 300000,
+        "documentos_estimados": 120,
         "limite_horas": 60.0,
     },
     "corporativo": {
-        "nombre": "Plan Profesional / Pro", # Ajustado a "Pro" según tu tabla
+        "nombre": "Plan Profesional / Pro",
         "precio": 939000.0,
-        "tokens_mensuales": 1000000,     # Actualizado a 1M tokens
-        "documentos_estimados": 400,     # Referencia para el usuario
+        "tokens_mensuales": 1000000,
+        "documentos_estimados": 400,
         "limite_horas": 200.0,
     },
 }
-
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import os
-import openai
-
-
-
-
-# Configuración de CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 2. Configuración oficial del cliente de OpenAI para Python
-client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-# 3. Modelos Pydantic para validar los datos de entrada
-class ConsultaFAQRequest(BaseModel):
-    tipoConsulta: str
-
-class ConsultaPlanRequest(BaseModel):
-    clienteId: str
-    tipoProblema: str = None
-
-
-
-class AuthModel(BaseModel):
-  email: str
-  password: str
-  plan: Optional[str] = "free"
-
-
-class PaymentPreferenceModel(BaseModel):
-  email: str
-  plan_name: str
-  price: Optional[float] = None
-
-
-class RenombrarActaRequest(BaseModel):
-  email: str
-  acta_id: str
-  nuevo_nombre: str
-
-
-class EliminarActaRequest(BaseModel):
-  email: str
-  acta_id: str
-
 
 # Estructura maestra de configuración
 CONFIGURACION_PLANES = {
@@ -200,6 +124,32 @@ CONFIGURACION_PLANES = {
     "corporativo": {"tokens": 1000000, "horas": 200.0}
 }
 
+# --- Modelos Pydantic unificados ---
+class ConsultaFAQRequest(BaseModel):
+    tipoConsulta: str
+
+class ConsultaPlanRequest(BaseModel):
+    clienteId: str
+    tipoProblema: Optional[str] = None
+
+class AuthModel(BaseModel):
+    email: str
+    password: str
+    plan: Optional[str] = "free"
+
+class PaymentPreferenceModel(BaseModel):
+    email: str
+    plan_name: str
+    price: Optional[float] = None
+
+class RenombrarActaRequest(BaseModel):
+    email: str
+    acta_id: str
+    nuevo_nombre: str
+
+class EliminarActaRequest(BaseModel):
+    email: str
+    acta_id: str
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
     existing_user = users_collection.find_one({"email": data.email})
