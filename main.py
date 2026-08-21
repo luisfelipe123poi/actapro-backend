@@ -1626,3 +1626,22 @@ async def obtener_cotizaciones():
             "success": False,
             "message": str(e)
         }
+
+# Ejemplo para añadir a tu main.py o routes.py
+from fastapi import APIRouter
+from your_db_module import db # Importa tu instancia de base de datos
+
+router = APIRouter()
+
+@router.get("/api/crm/license-stats")
+async def get_license_stats():
+    # Asumiendo que tienes una colección llamada 'users' con un campo 'plan'
+    total_users = await db.users.count_documents({})
+    free_users = await db.users.count_documents({"plan": "free"})
+    paid_users = await db.users.count_documents({"plan": {"$ne": "free"}})
+    
+    return {
+        "total": total_users,
+        "free": free_users,
+        "paid": paid_users
+    }
