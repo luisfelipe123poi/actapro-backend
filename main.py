@@ -1553,19 +1553,19 @@ async def verificar_plan(req: ConsultaPlanRequest):
     }
 
 from pydantic import BaseModel
+from typing import Optional
 
 # Modelo de datos para validar la solicitud de contacto Enterprise
-class ContactoEnterprise(BaseModel.model_config = None # o usa BaseModel estándar)
 class ContactoEnterprise(BaseModel):
     nombre: str
     email: str
-    empresa: str = None
+    empresa: Optional[str] = None
     mensaje: str
 
 @app.post("/api/contacto-enterprise")
 async def recibir_contacto_enterprise(datos: ContactoEnterprise):
     try:
-        # Aquí puedes procesar los datos (guardar en base de datos, enviar correo, etc.)
+        # Aquí puedes procesar los datos (guardar en base de datos, enviar un correo, etc.)
         print(f"Nueva solicitud Enterprise recibida: {datos.dict()}")
         
         return {
