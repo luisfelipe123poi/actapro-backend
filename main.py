@@ -1513,11 +1513,11 @@ async def soporte_faqs(req: ConsultaFAQRequest):
     faqs_data = {
         "audio": {
             "respuesta": "Para transcribir un audio, ve a la '+ Trancribe audios', sube tu archivo en formato .mp3 o .wav y haz clic en 'Generar Acta'. El sistema procesará el texto automáticamente.VE EL VIDEO",
-            "videoUrl": "https://assets.mixkit.co/videos/preview/mixkit-software-developer-working-in-an-office-43098-large.mp4" # Reemplaza con tu video real
+            "videoUrl": "https://youtu.be/3hVUXMcCu20" # Reemplaza con tu video real
         },
         "scanner": {
             "respuesta": "Para usar el escáner de documentos, dirígete al '+ Escanea y trancribe doc.', sube tu archivo en PDF o imagen clara, y presiona el botón 'Iniciar Escaneo IA' para extraer toda la información.",
-            "videoUrl": "https://assets.mixkit.co/videos/preview/mixkit-hands-typing-on-a-laptop-keyboard-43099-large.mp4" # Reemplaza con tu video real
+            "videoUrl": "https://youtu.be/1lm1zQudt6k" # Reemplaza con tu video real
         }
     }
     
