@@ -1565,8 +1565,10 @@ from bson import ObjectId
 # )
 
 class ContactoEnterprise(BaseModel):
+    nombre: str 
     email: str
     whatsapp: str
+    pais: str
     horas: int
     documentos: int
     empleados: int
