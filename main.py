@@ -1513,11 +1513,11 @@ async def soporte_faqs(req: ConsultaFAQRequest):
     faqs_data = {
         "audio": {
             "respuesta": "Para transcribir un audio, ve a '+ Transcribe audios', sube tu archivo en formato .mp3 o .wav y haz clic en 'Generar Acta'. El sistema procesará el texto automáticamente.",
-            "videoUrl": "https://drive.google.com/uc?export=download&id=1MoaH4wPmTQfBuSQsC3C9-p5w6UuYSukY"
+            "videoUrl": "https://drive.google.com/file/d/1MoaH4wPmTQfBuSQsC3C9-p5w6UuYSukY/preview"
         },
         "scanner": {
             "respuesta": "Para usar el escáner de documentos, dirígete al '+ Escanea y transcribe doc.', sube tu archivo en PDF o imagen clara, y presiona el botón 'Iniciar Escaneo IA'.",
-            "videoUrl": "https://drive.google.com/uc?export=download&id=1ONEoZImA4RFFWP5c440uhdF3uLpOzvGR"
+            "videoUrl": "https://drive.google.com/file/d/1ONEoZImA4RFFWP5c440uhdF3uLpOzvGR/preview"
         }
     }
     
