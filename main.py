@@ -1552,28 +1552,41 @@ async def verificar_plan(req: ConsultaPlanRequest):
         }
     }
 
+from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
+import datetime
+from bson import ObjectId
 
-# Modelo de datos actualizado para validar la solicitud de contacto Enterprise
+# (Asegúrate de tener configurado tu cliente de Motor/MongoDB en tu app, por ejemplo:
+# from motor.motor_asyncio import AsyncIOMotorClient
+# client = AsyncIOMotorClient("tu_url_de_mongo")
+# db = client["nombre_de_tu_base_de_datos"]
+# )
+
 class ContactoEnterprise(BaseModel):
     email: str
     whatsapp: str
     horas: int
     documentos: int
     empleados: int
-    # Opcional: si quieres permitir que agreguen un comentario adicional
     mensaje: Optional[str] = None
 
+# ==========================================
+# 1. ENDPOINT PARA GUARDAR COTIZACIÓN (POST)
+# ==========================================
 @app.post("/api/contacto-enterprise")
 async def recibir_contacto_enterprise(datos: ContactoEnterprise):
     try:
-        # Aquí puedes procesar los datos (guardar en base de datos, enviar un correo, etc.)
-        # El método .model_dump() es el estándar en las versiones modernas de Pydantic
-        print(f"Nueva solicitud Enterprise recibida: {datos.model_dump()}")
+        # Preparamos el documento con fecha actual y estado por defecto
+        nuevo_lead = datos.model_dump()
+        nuevo_lead["fecha"] = datetime.datetime.utcnow().isoformat()
+        nuevo_lead["estado"] = "Pendiente"
         
-        # Lógica futura: Aquí iría la conexión a tu base de datos o el envío de email
-        # db.cotizaciones.insert_one(datos.model_dump())
+        # Guardamos en la colección 'cotizaciones' de MongoDB
+        resultado_db = await db.cotizaciones.insert_one(nuevo_lead)
+        
+        print(f"Nueva solicitud Enterprise guardada con ID: {resultado_db.inserted_id}")
         
         return {
             "success": True, 
@@ -1583,5 +1596,32 @@ async def recibir_contacto_enterprise(datos: ContactoEnterprise):
         print(f"Error procesando solicitud Enterprise: {e}")
         return {
             "success": False, 
+            "message": str(e)
+        }
+
+# ==========================================
+# 2. ENDPOINT PARA EL PANEL DE ADMINISTRACIÓN (GET)
+# ==========================================
+@app.get("/api/admin/cotizaciones")
+async def obtener_cotizaciones():
+    try:
+        # Consultamos todas las cotizaciones ordenadas de la más reciente a la más antigua
+        cursor = db.cotizaciones.find().sort("fecha", -1)
+        cotizaciones_db = await cursor.to_list(length=1000)
+        
+        # Transformamos el ObjectId de MongoDB a string (_id -> string) para evitar errores en JSON
+        lista_leads = []
+        for c in cotizaciones_db:
+            c["_id"] = str(c["_id"])
+            lista_leads.append(c)
+        
+        return {
+            "success": True,
+            "cotizaciones": lista_leads
+        }
+    except Exception as e:
+        print(f"Error obteniendo cotizaciones de MongoDB: {e}")
+        return {
+            "success": False,
             "message": str(e)
         }
