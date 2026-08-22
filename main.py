@@ -2111,16 +2111,24 @@ def listar_cuentas_free(db=None):
         raise HTTPException(status_code=500, detail=f"Error al listar cuentas free: {str(error)}")
 
 
+from urllib.parse import unquote
+from fastapi import HTTPException
+
 @app.delete("/api/admin/cuentas-free/{identifier}")
 def eliminar_cuenta_free_endpoint(identifier: str):
     try:
-        from urllib.parse import unquote
-        identifier_decodificado = unquote(identifier)
-
-        # Buscamos por correo o por _id según lo que envíes desde el cliente
-        query = {"$or": [{"email": identifier_decodificado}, {"_id": identifier_decodificado}], "plan": "free"}
+        email_decodificado = unquote(identifier)
         
-        # Operación real en tu base de datos MongoDB
+        # Intenta borrar por email o por _id asegurando que el plan sea 'free'
+        query = {
+            "$or": [
+                {"email": email_decodificado}, 
+                {"_id": email_decodificado}
+            ], 
+            "plan": "free"
+        }
+        
+        # Asegúrate de que 'users_collection' sea tu variable de la base de datos MongoDB
         resultado = users_collection.find_one_and_delete(query)
 
         if not resultado:
@@ -2128,13 +2136,13 @@ def eliminar_cuenta_free_endpoint(identifier: str):
 
         return {
             "success": True,
-            "message": "Cuenta free eliminada con éxito",
-            "identifier": identifier_decodificado
+            "message": f"Cuenta {email_decodificado} eliminada con éxito"
         }
     except HTTPException as he:
         raise he
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Error al eliminar la cuenta free: {str(error)}")
+        
 @app.get("/")
 def read_root():
     return {
