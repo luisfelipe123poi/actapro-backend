@@ -1969,11 +1969,11 @@ def get_license_stats_advanced():
 app.include_router(crm_router)
 
 from pydantic import BaseModel
+from fastapi import HTTPException
 
-# Definición corregida usando str en lugar de EmailStr
 class CuentaFreeCreate(BaseModel):
     nombre: str
-    email: str  # Cambiado a string plano para no requerir email-validator
+    email: str
     password: str
     plan: str = "free"
     horas_audio_limite: float = 2.0
@@ -1981,22 +1981,33 @@ class CuentaFreeCreate(BaseModel):
 
 @app.post("/api/crear-cuenta-free")
 async def crear_cuenta_free(data: CuentaFreeCreate):
+    # 1. Verificar si ya existe una cuenta con ese correo en la colección de usuarios
+    # (Asegúrate de que 'db' o 'usuarios_collection' apunte a tu base de datos activa)
+    existing_user = await db.usuarios.find_one({"email": data.email})
+    if existing_user:
+        raise HTTPException(
+            status_code=400, 
+            detail="Ya existe una cuenta registrada con este correo electrónico."
+        )
+
+    # 2. Estructurar el documento para MongoDB
     nuevo_usuario = {
         "nombre": data.nombre,
         "email": data.email,
-        "password": data.password,
+        "password": data.password,  # Si manejas hashing con bcrypt, aplícalo aquí
         "plan": data.plan,
         "horas_audio_disponibles": data.horas_audio_limite,
         "tokens_disponibles": data.tokens_limite,
         "activo": True
     }
-    
-    # Aquí ejecutas la inserción en tu base de datos de MongoDB
-    # await db.usuarios.insert_one(nuevo_usuario)
+
+    # 3. Insertar el documento de manera real en la colección
+    resultado = await db.usuarios.insert_one(nuevo_usuario)
 
     return {
         "success": True,
         "message": f"Cuenta free creada exitosamente para {data.email}",
+        "user_id": str(resultado.inserted_id),
         "data": {
             "email": data.email,
             "plan": data.plan,
