@@ -2055,109 +2055,82 @@ def recuperar_link_pago(data: RecuperarLinkRequest):
         "link_pago": link_pago
     }
 
-import { MercadoPagoConfig, PreApproval } from 'mercadopago';
-
-// Configura tus credenciales (Access Token)
-const client = new MercadoPagoConfig({ accessToken: 'ENV_ACCESS_TOKEN' });
-
-/**
- * Cancela una suscripción activa en Mercado Pago.
- * @param {string} preapprovalId - El ID de la suscripción (ej: 2c938084...)
- */
-async function cancelarSuscripcionMercadoPago(preapprovalId) {
-    try {
-        const preApproval = new PreApproval(client);
-        
-        const response = await preApproval.update({
-            id: preapprovalId,
-            body: {
-                status: 'canceled'
-            }
-        });
-
-        console.log('Suscripción cancelada con éxito:', response);
-        return response;
-    } catch (error) {
-        console.error('Error al cancelar la suscripción:', error);
-        throw error;
-    }
-}
-
-import { MercadoPagoConfig, PreApproval } from 'mercadopago';
-
-const client = new MercadoPagoConfig({ accessToken: 'ENV_ACCESS_TOKEN' });
-
-/**
- * Programa la cancelación de una suscripción asignando una fecha límite (end_date).
- * @param {string} preapprovalId - ID de la suscripción en Mercado Pago.
- * @param {string} fechaVencimiento - Fecha de corte en formato ISO 8601 (ej: '2026-09-30T23:59:59Z').
- */
-async function programarCancelacionSuscripcion(preapprovalId, fechaVencimiento) {
-    try {
-        const preApproval = new PreApproval(client);
-        
-        const response = await preApproval.update({
-            id: preapprovalId,
-            body: {
-                auto_recurring: {
-                    end_date: fechaVencimiento
-                }
-            }
-        });
-
-        console.log('Cancelación programada con éxito:', response);
-        return response;
-    } catch (error) {
-        console.error('Error al programar la cancelación:', error);
-        throw error;
-    }
-}
-
-import mongoose from 'mongoose';
-
-// Esquema de ejemplo para usuarios
-const UserSchema = new mongoose.Schema({
-    email: String,
-    plan: { type: String, default: 'free' }, // 'free' o 'premium'
-    createdAt: { type: Date, default: Date.now }
-});
-const User = mongoose.model('User', UserSchema);
-
-/**
- * Lista todas las cuentas con plan 'free'.
- */
-async function listarCuentasFree() {
-    try {
-        const freeUsers = await User.find({ plan: 'free' });
-        console.log(`Cuentas free encontradas: ${freeUsers.length}`);
-        return freeUsers;
-    } catch (error) {
-        console.error('Error al listar cuentas free:', error);
-        throw error;
-    }
-}
-
-/**
- * Elimina una cuenta free específica por su ID, validando que no sea de pago.
- * @param {string} userId - ID del usuario.
- */
-async function eliminarCuentaFree(userId) {
-    try {
-        // Se asegura de borrar únicamente si el plan es 'free' por seguridad
-        const resultado = await User.findOneAndDelete({ _id: userId, plan: 'free' });
-        
-        if (!resultado) {
-            console.log('No se encontró la cuenta o la cuenta no es de tipo free.');
-            return null;
+# --- ENDPOINT 2: Cancelar Suscripción Activa en Mercado Pago ---
+@router.post("/api/admin/cancelar-suscripcion")
+def cancelar_suscripcion_mercado_pago(data: CancelarSuscripcionRequest):
+    try:
+        # En el SDK de Python, las suscripciones recurrentes (preapproval) se actualizan mediante .preapproval().update()
+        update_data = {
+            "status": "canceled"
         }
+        response = mp_sdk.preapproval().update(data.preapproval_id, update_data)
+        
+        return {
+            "success": True,
+            "message": "Suscripción cancelada con éxito",
+            "response": response
+        }
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Error al cancelar la suscripción: {str(error)}")
 
-        console.log('Cuenta free eliminada con éxito:', resultado._id);
-        return resultado;
-    } catch (error) {
-        console.error('Error al eliminar la cuenta free:', error);
-        throw error;
-    }
-}
+
+# --- ENDPOINT 3: Programar Cancelación de Suscripción ---
+@router.post("/api/admin/programar-cancelacion")
+def programar_cancelacion_suscripcion(data: ProgramarCancelacionRequest):
+    try:
+        update_data = {
+            "auto_recurring": {
+                "end_date": data.fecha_vencimiento
+            }
+        }
+        response = mp_sdk.preapproval().update(data.preapproval_id, update_data)
+        
+        return {
+            "success": True,
+            "message": "Cancelación programada con éxito",
+            "response": response
+        }
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Error al programar la cancelación: {str(error)}")
+
+
+# --- ENDPOINT 4: Listar Cuentas Free ---
+@router.get("/api/admin/cuentas-free")
+def listar_cuentas_free(db=None):
+    try:
+        # Si usas PyMongo / Motor:
+        # free_users = list(db.usuarios.find({"plan": "free"}))
+        free_users = [] # Reemplaza con tu consulta real a la base de datos
+        
+        return {
+            "success": True,
+            "total": len(free_users),
+            "cuentas": free_users
+        }
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Error al listar cuentas free: {str(error)}")
+
+
+# --- ENDPOINT 5: Eliminar Cuenta Free por ID ---
+@router.delete("/api/admin/eliminar-cuenta-free/{user_id}")
+def eliminar_cuenta_free(user_id: str, coleccion_usuarios=None):
+    try:
+        # Validar y borrar únicamente si el plan es 'free' por seguridad
+        # resultado = coleccion_usuarios.find_one_and_delete({"_id": user_id, "plan": "free"})
+        resultado = None # Reemplaza con tu lógica de base de datos
+        
+        if not resultado:
+            raise HTTPException(status_code=404, detail="No se encontró la cuenta o la cuenta no es de tipo free.")
+
+        return {
+            "success": True,
+            "message": "Cuenta free eliminada con éxito",
+            "user_id": user_id
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Error al eliminar la cuenta free: {str(error)}")
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
