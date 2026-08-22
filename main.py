@@ -248,22 +248,32 @@ def login_usuario(data: AuthModel):
     }
 
 
+from fastapi import FastAPI, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorClient # O tu cliente de pymongo habitual
+
+# Ejemplo de endpoint optimizado en tu FastAPI
 @app.get("/api/user/status")
-def get_user_status(email: str):
-    usuario = users_collection.find_one({"email": email})
-    if not usuario:
+async def get_user_status(email: str = Query(...)):
+    # Buscamos en la colección de usuarios/licencias
+    user = await db["users"].find_one({"email": email})
+    
+    if not user:
+        # Intentar buscar por campo alternativo si usas otro esquema
+        user = await db["users"].find_one({"correo": email})
+        
+    if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     return {
-        "email": usuario.get("email"),
-        "plan": usuario.get("plan", "free"),
-        "tokens_usados": usuario.get("tokens_usados", 0),
-        "limite_tokens_mes": usuario.get("limite_tokens_mes", 0),
-        "horas_restantes": usuario.get("horas_restantes", 0.0),
-        "horas_usadas_mes": usuario.get("horas_usadas_mes", 0.0),
-        "limite_horas_mes": usuario.get("limite_horas_mes", 0.0)
+        "email": user.get("email", user.get("correo", email)),
+        "nombre_empresa": user.get("nombre_empresa", user.get("empresa", "N/D")),
+        "plan": user.get("plan", user.get("tipo_licencia", "b2b")),
+        "horas_restantes": user.get("horas_restantes", user.get("horas_audio", 0)),
+        "horas_usadas_mes": user.get("horas_usadas_mes", 0),
+        "limite_horas_mes": user.get("horas_audio", user.get("limite_horas_mes", 0)),
+        "tokens_usados": user.get("tokens_usados", 0),
+        "limite_tokens_mes": user.get("tokens", user.get("limite_tokens_mes", 0))
     }
-
 
 @app.get("/api/actas/historial")
 def obtener_historial_actas(email: str):
