@@ -1968,39 +1968,36 @@ def get_license_stats_advanced():
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
-from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
-# Modelo Pydantic para validar los datos que llegan desde el script de escritorio
-class CuentaFreeCreate(BaseModel.name: str = None, # o nombre: str
-    nombre: str,
-    email: EmailStr,
-    password: str,
-    plan: str = "free",
-    horas_audio_limite: float = 2.0,
+# Definición correcta del modelo Pydantic
+class CuentaFreeCreate(BaseModel):
+    nombre: str
+    email: EmailStr
+    password: str
+    plan: str = "free"
+    horas_audio_limite: float = 2.0
     tokens_limite: int = 50000
 
 @app.post("/api/crear-cuenta-free")
 async def crear_cuenta_free(data: CuentaFreeCreate):
-    # 1. Verificar si el usuario ya existe en tu colección de MongoDB
+    # Aquí va tu lógica para insertar el usuario en MongoDB
+    # Ejemplo:
     # db = client["tu_base_de_datos"]
     # existing_user = await db.usuarios.find_one({"email": data.email})
     # if existing_user:
     #     raise HTTPException(status_code=400, detail="El correo ya está registrado.")
     
-    # 2. Encriptar contraseña (ej. usando bcrypt como ya usas en Moto POS)
-    # hashed_password = bcrypt.hashpw(data.password.encode('utf-8'), bcrypt.gensalt())
-
-    # 3. Guardar en MongoDB con los límites configurados
     nuevo_usuario = {
         "nombre": data.nombre,
         "email": data.email,
-        "password": "hashed_password_aqui",
+        "password": data.password, # Recuerda aplicar hash si usas bcrypt
         "plan": data.plan,
         "horas_audio_disponibles": data.horas_audio_limite,
         "tokens_disponibles": data.tokens_limite,
         "activo": True
     }
+    
     # await db.usuarios.insert_one(nuevo_usuario)
 
     return {
