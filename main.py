@@ -248,19 +248,11 @@ def login_usuario(data: AuthModel):
     }
 
 
-from fastapi import FastAPI, HTTPException, Query
-from motor.motor_asyncio import AsyncIOMotorClient # O tu cliente de pymongo habitual
-
-# Ejemplo de endpoint optimizado en tu FastAPI
 @app.get("/api/user/status")
-async def get_user_status(email: str = Query(...)):
-    # Buscamos en la colección de usuarios/licencias
-    user = await db["users"].find_one({"email": email})
+def get_user_status(email: str = Query(...)):
+    # Buscar el usuario por email o correo en la colección
+    user = db["users"].find_one({"$or": [{"email": email}, {"correo": email}]})
     
-    if not user:
-        # Intentar buscar por campo alternativo si usas otro esquema
-        user = await db["users"].find_one({"correo": email})
-        
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
