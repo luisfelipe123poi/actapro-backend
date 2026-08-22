@@ -1991,7 +1991,7 @@ def crear_cuenta_feedback(data: FeedbackAccountModel):
         # Gestión personalizada de Tokens
         "tokens_usados": 0,
         "limite_tokens_mes": data.tokens,
-        "created_at": datetime.datetime.now(datetime.timezone.utc)  # <-- Corregido aquí
+        "created_at": datetime.datetime.now(datetime.timezone.utc)
     }
 
     users_collection.insert_one(nuevo_usuario)
