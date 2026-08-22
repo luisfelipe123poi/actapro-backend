@@ -2162,6 +2162,19 @@ def listar_cuentas_free_endpoint():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/licencias")
+def listar_licencias_endpoint():
+    try:
+        # Asegúrate de cambiar 'licenses_collection' por el nombre de tu colección en MongoDB
+        licencias = list(licenses_collection.find({}, {"_id": 0})) # Excluimos _id o lo adaptamos si prefieres mostrarlo
+        return {
+            "success": True,
+            "total": len(licencias),
+            "licencias": licencias
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
