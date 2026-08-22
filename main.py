@@ -1968,12 +1968,12 @@ def get_license_stats_advanced():
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
-# Definición correcta del modelo Pydantic
+# Definición corregida usando str en lugar de EmailStr
 class CuentaFreeCreate(BaseModel):
     nombre: str
-    email: EmailStr
+    email: str  # Cambiado a string plano para no requerir email-validator
     password: str
     plan: str = "free"
     horas_audio_limite: float = 2.0
@@ -1981,23 +1981,17 @@ class CuentaFreeCreate(BaseModel):
 
 @app.post("/api/crear-cuenta-free")
 async def crear_cuenta_free(data: CuentaFreeCreate):
-    # Aquí va tu lógica para insertar el usuario en MongoDB
-    # Ejemplo:
-    # db = client["tu_base_de_datos"]
-    # existing_user = await db.usuarios.find_one({"email": data.email})
-    # if existing_user:
-    #     raise HTTPException(status_code=400, detail="El correo ya está registrado.")
-    
     nuevo_usuario = {
         "nombre": data.nombre,
         "email": data.email,
-        "password": data.password, # Recuerda aplicar hash si usas bcrypt
+        "password": data.password,
         "plan": data.plan,
         "horas_audio_disponibles": data.horas_audio_limite,
         "tokens_disponibles": data.tokens_limite,
         "activo": True
     }
     
+    # Aquí ejecutas la inserción en tu base de datos de MongoDB
     # await db.usuarios.insert_one(nuevo_usuario)
 
     return {
