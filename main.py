@@ -249,22 +249,52 @@ def login_usuario(data: AuthModel):
 
 
 @app.get("/api/user/status")
-def get_user_status(email: str = Query(...)):
-    # Buscar el usuario por email o correo en la colección
-    user = db["users"].find_one({"$or": [{"email": email}, {"correo": email}]})
+def get_user_status(email: str = Query(None), empresa: str = Query(None)):
+    """
+    Endpoint completo para consultar la información detallada de la licencia, 
+    horas y tokens de un usuario o empresa desde MongoDB.
+    """
+    if not email and not empresa:
+        raise HTTPException(
+            status_code=400, 
+            detail="Debe proporcionar al menos un parámetro de búsqueda ('email' o 'empresa')."
+        )
+
+    # Construir filtro de búsqueda flexible
+    query_filter = {}
+    if email:
+        query_filter = {"$or": [{"email": email}, {"correo": email}]}
+    elif empresa:
+        query_filter = {"nombre_empresa": {"$regex": empresa, "$options": "i"}}
+
+    # Buscar en la colección de usuarios/licencias
+    user = db["users"].find_one(query_filter)
     
     if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(
+            status_code=404, 
+            detail="No se encontró ninguna licencia o usuario con los datos proporcionados."
+        )
 
+    # Retornar absolutamente toda la información consolidada
     return {
-        "email": user.get("email", user.get("correo", email)),
-        "nombre_empresa": user.get("nombre_empresa", user.get("empresa", "N/D")),
-        "plan": user.get("plan", user.get("tipo_licencia", "b2b")),
-        "horas_restantes": user.get("horas_restantes", user.get("horas_audio", 0)),
-        "horas_usadas_mes": user.get("horas_usadas_mes", 0),
-        "limite_horas_mes": user.get("horas_audio", user.get("limite_horas_mes", 0)),
-        "tokens_usados": user.get("tokens_usados", 0),
-        "limite_tokens_mes": user.get("tokens", user.get("limite_tokens_mes", 0))
+        "status": "success",
+        "data": {
+            "id": str(user.get("_id")),
+            "email": user.get("email", user.get("correo", "N/D")),
+            "nombre_empresa": user.get("nombre_empresa", user.get("empresa", "N/D")),
+            "plan": str(user.get("plan", user.get("tipo_licencia", "free"))).upper(),
+            # Control de Horas de Audio
+            "horas_restantes": user.get("horas_restantes", 0.0),
+            "horas_usadas_mes": user.get("horas_usadas_mes", 0.0),
+            "limite_horas_mes": user.get("horas_audio", user.get("limite_horas_mes", 0.0)),
+            # Control de Tokens de IA
+            "tokens_usados": user.get("tokens_usados", 0),
+            "limite_tokens_mes": user.get("tokens", user.get("limite_tokens_mes", 0)),
+            # Datos comerciales adicionales por si los tienes guardados
+            "precio_mensual": user.get("precio_mensual", 0),
+            "fecha_actualizacion": user.get("fecha_actualizacion", user.get("updated_at", "N/D"))
+        }
     }
 
 @app.get("/api/actas/historial")
