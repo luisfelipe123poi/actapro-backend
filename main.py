@@ -1970,6 +1970,12 @@ app.include_router(crm_router)
 
 from pydantic import BaseModel
 from fastapi import HTTPException
+from motor.motor_asyncio import AsyncIOMotorClient
+
+# 1. Inicializar cliente asíncrono correctamente
+mongo_client = AsyncIOMotorClient(MONGO_URI)
+db = mongo_client["actabot_db"]
+users_collection = db["users"]
 
 class CuentaFreeCreate(BaseModel):
     nombre: str
