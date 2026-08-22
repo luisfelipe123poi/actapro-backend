@@ -875,7 +875,7 @@ async def procesar_asamblea(
         data_acta = {
             "email": email,
             "nombre_acta": nombre_archivo_acta,
-            "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "peso": peso_archivo,
             "contenido": acta_final,
         }
@@ -898,7 +898,7 @@ async def procesar_asamblea(
 
     except Exception as e:
         import traceback
-        traceback.print_exc() # Esto imprimirá el error exacto en los logs de Render
+        traceback.print_exc()
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
