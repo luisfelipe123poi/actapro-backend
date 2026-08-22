@@ -778,7 +778,7 @@ async def procesar_asamblea(
                 "filename": file.filename,
                 "texto_transcrito": texto_transcrito,
                 "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "createdAt": datetime.datetime.utcnow(),
+                "createdAt": datetime.utcnow(),
             })
 
         # Lógica de nombre del acta
