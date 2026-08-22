@@ -1965,6 +1965,44 @@ def get_license_stats_advanced():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class FeedbackAccountModel(BaseModel):
+    email: str
+    password: str
+    horas: float
+    tokens: int
+    nombre_empresa: Optional[str] = "Cuenta Feedback"
+
+@app.post("/api/admin/crear-feedback")
+def crear_cuenta_feedback(data: FeedbackAccountModel):
+    """Crea una cuenta gratuita con límites de horas y tokens personalizados para feedback."""
+    existing_user = users_collection.find_one({"email": data.email})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="El correo ya se encuentra registrado.")
+
+    nuevo_usuario = {
+        "email": data.email,
+        "password": data.password,
+        "plan": "feedback",
+        "nombre_empresa": data.nombre_empresa,
+        # Gestión personalizada de Horas
+        "horas_restantes": data.horas,
+        "horas_usadas_mes": 0.0,
+        "limite_horas_mes": data.horas,
+        # Gestión personalizada de Tokens
+        "tokens_usados": 0,
+        "limite_tokens_mes": data.tokens,
+        "created_at": datetime.datetime.utcnow()
+    }
+
+    users_collection.insert_one(nuevo_usuario)
+    return {
+        "status": "success",
+        "message": "Cuenta feedback creada exitosamente",
+        "email": data.email,
+        "horas": data.horas,
+        "tokens": data.tokens
+    }
+
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
