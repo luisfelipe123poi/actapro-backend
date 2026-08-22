@@ -2131,6 +2131,26 @@ def eliminar_cuenta_free(user_id: str, coleccion_usuarios=None):
         raise he
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Error al eliminar la cuenta free: {str(error)}")
+
+@app.get("/")
+def read_root():
+    return {
+        "status": "online",
+        "message": "ActaBot PH API funcionando correctamente"
+    }
+
+@app.get("/api/admin/cuentas-free")
+def listar_cuentas_free_endpoint():
+    try:
+        # Consulta real a tu colección de usuarios con plan 'free'
+        free_users = list(users_collection.find({"plan": "free"}, {"_id": 0, "password": 0}))
+        return {
+            "success": True,
+            "total": len(free_users),
+            "cuentas": free_users
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
