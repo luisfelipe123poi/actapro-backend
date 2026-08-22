@@ -1991,7 +1991,7 @@ def crear_cuenta_feedback(data: FeedbackAccountModel):
         # Gestión personalizada de Tokens
         "tokens_usados": 0,
         "limite_tokens_mes": data.tokens,
-        "created_at": datetime.datetime.utcnow()
+        "created_at": datetime.datetime.now(datetime.timezone.utc)  # <-- Corregido aquí
     }
 
     users_collection.insert_one(nuevo_usuario)
@@ -2002,7 +2002,6 @@ def crear_cuenta_feedback(data: FeedbackAccountModel):
         "horas": data.horas,
         "tokens": data.tokens
     }
-
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
