@@ -2166,8 +2166,9 @@ def listar_cuentas_free_endpoint():
 @app.get("/api/admin/licencias")
 def listar_licencias_endpoint():
     try:
-        # Asegúrate de cambiar 'licenses_collection' por el nombre de tu colección en MongoDB
-        licencias = list(licenses_collection.find({}, {"_id": 0})) # Excluimos _id o lo adaptamos si prefieres mostrarlo
+        # Buscamos usuarios cuyo plan NO sea 'free' (o que tengan licencia asignada)
+        licencias = list(users_collection.find({"plan": {"$ne": "free"}}, {"_id": 0, "password": 0}))
+        
         return {
             "success": True,
             "total": len(licencias),
