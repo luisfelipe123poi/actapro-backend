@@ -2054,6 +2054,110 @@ def recuperar_link_pago(data: RecuperarLinkRequest):
         "plan": plan_nombre,
         "link_pago": link_pago
     }
+
+import { MercadoPagoConfig, PreApproval } from 'mercadopago';
+
+// Configura tus credenciales (Access Token)
+const client = new MercadoPagoConfig({ accessToken: 'ENV_ACCESS_TOKEN' });
+
+/**
+ * Cancela una suscripción activa en Mercado Pago.
+ * @param {string} preapprovalId - El ID de la suscripción (ej: 2c938084...)
+ */
+async function cancelarSuscripcionMercadoPago(preapprovalId) {
+    try {
+        const preApproval = new PreApproval(client);
+        
+        const response = await preApproval.update({
+            id: preapprovalId,
+            body: {
+                status: 'canceled'
+            }
+        });
+
+        console.log('Suscripción cancelada con éxito:', response);
+        return response;
+    } catch (error) {
+        console.error('Error al cancelar la suscripción:', error);
+        throw error;
+    }
+}
+
+import { MercadoPagoConfig, PreApproval } from 'mercadopago';
+
+const client = new MercadoPagoConfig({ accessToken: 'ENV_ACCESS_TOKEN' });
+
+/**
+ * Programa la cancelación de una suscripción asignando una fecha límite (end_date).
+ * @param {string} preapprovalId - ID de la suscripción en Mercado Pago.
+ * @param {string} fechaVencimiento - Fecha de corte en formato ISO 8601 (ej: '2026-09-30T23:59:59Z').
+ */
+async function programarCancelacionSuscripcion(preapprovalId, fechaVencimiento) {
+    try {
+        const preApproval = new PreApproval(client);
+        
+        const response = await preApproval.update({
+            id: preapprovalId,
+            body: {
+                auto_recurring: {
+                    end_date: fechaVencimiento
+                }
+            }
+        });
+
+        console.log('Cancelación programada con éxito:', response);
+        return response;
+    } catch (error) {
+        console.error('Error al programar la cancelación:', error);
+        throw error;
+    }
+}
+
+import mongoose from 'mongoose';
+
+// Esquema de ejemplo para usuarios
+const UserSchema = new mongoose.Schema({
+    email: String,
+    plan: { type: String, default: 'free' }, // 'free' o 'premium'
+    createdAt: { type: Date, default: Date.now }
+});
+const User = mongoose.model('User', UserSchema);
+
+/**
+ * Lista todas las cuentas con plan 'free'.
+ */
+async function listarCuentasFree() {
+    try {
+        const freeUsers = await User.find({ plan: 'free' });
+        console.log(`Cuentas free encontradas: ${freeUsers.length}`);
+        return freeUsers;
+    } catch (error) {
+        console.error('Error al listar cuentas free:', error);
+        throw error;
+    }
+}
+
+/**
+ * Elimina una cuenta free específica por su ID, validando que no sea de pago.
+ * @param {string} userId - ID del usuario.
+ */
+async function eliminarCuentaFree(userId) {
+    try {
+        // Se asegura de borrar únicamente si el plan es 'free' por seguridad
+        const resultado = await User.findOneAndDelete({ _id: userId, plan: 'free' });
+        
+        if (!resultado) {
+            console.log('No se encontró la cuenta o la cuenta no es de tipo free.');
+            return null;
+        }
+
+        console.log('Cuenta free eliminada con éxito:', resultado._id);
+        return resultado;
+    } catch (error) {
+        console.error('Error al eliminar la cuenta free:', error);
+        throw error;
+    }
+}
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
