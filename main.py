@@ -2111,27 +2111,30 @@ def listar_cuentas_free(db=None):
         raise HTTPException(status_code=500, detail=f"Error al listar cuentas free: {str(error)}")
 
 
-# --- ENDPOINT 5: Eliminar Cuenta Free por ID ---
-@router.delete("/api/admin/eliminar-cuenta-free/{user_id}")
-def eliminar_cuenta_free(user_id: str, coleccion_usuarios=None):
+@app.delete("/api/admin/cuentas-free/{identifier}")
+def eliminar_cuenta_free_endpoint(identifier: str):
     try:
-        # Validar y borrar únicamente si el plan es 'free' por seguridad
-        # resultado = coleccion_usuarios.find_one_and_delete({"_id": user_id, "plan": "free"})
-        resultado = None # Reemplaza con tu lógica de base de datos
+        from urllib.parse import unquote
+        identifier_decodificado = unquote(identifier)
+
+        # Buscamos por correo o por _id según lo que envíes desde el cliente
+        query = {"$or": [{"email": identifier_decodificado}, {"_id": identifier_decodificado}], "plan": "free"}
         
+        # Operación real en tu base de datos MongoDB
+        resultado = users_collection.find_one_and_delete(query)
+
         if not resultado:
             raise HTTPException(status_code=404, detail="No se encontró la cuenta o la cuenta no es de tipo free.")
 
         return {
             "success": True,
             "message": "Cuenta free eliminada con éxito",
-            "user_id": user_id
+            "identifier": identifier_decodificado
         }
     except HTTPException as he:
         raise he
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Error al eliminar la cuenta free: {str(error)}")
-
 @app.get("/")
 def read_root():
     return {
