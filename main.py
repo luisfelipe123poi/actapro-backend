@@ -2002,6 +2002,58 @@ def crear_cuenta_feedback(data: FeedbackAccountModel):
         "horas": data.horas,
         "tokens": data.tokens
     }
+
+class RecuperarLinkRequest(BaseModel):
+    email: str
+
+@router.post("/api/admin/recuperar-link-pago")
+def recuperar_link_pago(data: RecuperarLinkRequest):
+    # 1. Buscar al usuario en tu base de datos (MongoDB / Firestore / SQLite, etc.)
+    usuario = coleccion_usuarios.find_one({"email": data.email}) # Ejemplo con MongoDB
+    
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado en el sistema.")
+    
+    # 2. Extraer los datos del plan actual que tenía
+    plan_nombre = usuario.get("plan", "feedback")
+    horas = usuario.get("limite_horas_mes", 10)
+    tokens = usuario.get("limite_tokens_mes", 50000)
+    
+    # 3. GENERAR EL LINK DE PAGO NUEVO
+    # Aquí integras la llamada a tu pasarela de pagos (Ej: Mercado Pago SDK) 
+    # utilizando los valores guardados del usuario:
+    try:
+        # ---- EJEMPLO CON MERCADO PAGO SDK ----
+        # preference_data = {
+        #     "items": [{
+        #         "title": f"Renovación Plan {plan_nombre.capitalize()} - {usuario.get('nombre_empresa')}",
+        #         "quantity": 1,
+        #         "unit_price": 30.00 # El precio correspondiente a su plan
+        #     }],
+        #     "payer": {"email": data.email},
+        #     "back_urls": {
+        #         "success": "https://tu-web.com/pago-exitoso",
+        #         "pending": "https://tu-web.com/pago-pendiente",
+        #         "failure": "https://tu-web.com/pago-fallido"
+        #     },
+        #     "auto_return": "approved"
+        # }
+        # preference_response = sdk.preference().create(preference_data)
+        # link_pago = preference_response["response"]["init_point"]
+        
+        # (Simulación para que lo adaptes a tu pasarela actual si usas otra):
+        link_pago = f"https://www.mercadopago.com.co/checkout/v1/redirect?pref_id=EJEMPLO_RECUPERADO_{data.email}"
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al generar el link de pago: {str(e)}")
+
+    return {
+        "success": True,
+        "email": data.email,
+        "nombre_empresa": usuario.get("nombre_empresa"),
+        "plan": plan_nombre,
+        "link_pago": link_pago
+    }
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
