@@ -199,6 +199,41 @@ CONFIGURACION_PLANES = {
     "corporativo": {"tokens": 1000000, "horas": 200.0}
 }
 
+# ==========================================
+# 2. Función Auxiliar para Enviar Correos con Brevo
+# ==========================================
+def enviar_correo_brevo(destinatario_email: str, destinatario_nombre: str, asunto: str, html_contenido: str):
+    """Envía un correo electrónico transaccional utilizando la API de Brevo."""
+    if not brevo_client:
+        print("Brevo no está inicializado (falta la API Key).")
+        return False
+    
+    try:
+        brevo_client.transactional_emails.send_transac_email(
+            subject=asunto,
+            html_content=html_contenido,
+            sender=SendTransacEmailRequestSender(
+                name="ActaPro Core",
+                email="no-reply@actaprocore.com"  # Reemplaza con tu correo o dominio verificado en Brevo
+            ),
+            to=[
+                SendTransacEmailRequestToItem(
+                    email=destinatario_email,
+                    name=destinatario_nombre
+                )
+            ]
+        )
+        print(f"Correo enviado exitosamente a {destinatario_email}")
+        return True
+    except Exception as e:
+        print(f"Error al enviar correo mediante Brevo: {e}")
+        return False
+
+
+# ==========================================
+# 3. Rutas de la Aplicación
+# ==========================================
+
 @app.post("/api/registro")
 def registrar_usuario(data: AuthModel):
     existing_user = users_collection.find_one({"email": data.email})
@@ -210,7 +245,7 @@ def registrar_usuario(data: AuthModel):
 
     nuevo_usuario = {
         "email": data.email,
-        "password": data.password, # Nota: Recuerda hashear esto en producción
+        "password": data.password,  # Nota: Recuerda hashear esto en producción
         "plan": data.plan,
         # Gestión de Horas
         "horas_restantes": plan_config["horas"],
@@ -222,6 +257,27 @@ def registrar_usuario(data: AuthModel):
     }
 
     users_collection.insert_one(nuevo_usuario)
+
+    # Enviar correo de bienvenida según el plan con Brevo
+    nombre_usuario = data.email.split("@")[0]
+    asunto_correo = f"¡Bienvenido a ActaPro Core - Plan {data.plan.capitalize()} Activado!"
+    html_cuerpo = f"""
+    <div style="font-family: Arial, sans-serif; color: #333; padding: 20px; max-width: 600px; margin: auto; border: 1px solid #eaeaea; border-radius: 8px;">
+        <h2 style="color: #2563eb;">¡Hola {nombre_usuario}, bienvenido a ActaPro Core!</h2>
+        <p>Tu cuenta ha sido registrada exitosamente bajo el plan <strong>{data.plan.upper()}</strong>.</p>
+        <hr style="border: none; border-top: 1px solid #eaeaea; margin: 20px 0;">
+        <p><strong>Detalles de tu cuenta:</strong></p>
+        <ul>
+            <li>Límite de Tokens: {plan_config["tokens"]}</li>
+            <li>Límite de Horas: {plan_config["horas"]} hrs</li>
+        </ul>
+        <p>Ya puedes comenzar a aprovechar al máximo todas las herramientas de actas inteligentes.</p>
+        <br>
+        <p style="font-size: 12px; color: #666;">Atentamente,<br>El equipo de ActaPro Core</p>
+    </div>
+    """
+    enviar_correo_brevo(data.email, nombre_usuario, asunto_correo, html_cuerpo)
+
     return {
         "message": "Usuario registrado con éxito",
         "email": data.email,
