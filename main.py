@@ -55,13 +55,37 @@ load_dotenv()
 
 app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.5")
 
+
+# ==========================================
+# 0. Configuración de CORS (¡Soluciona el bloqueo!)
+# ==========================================
+origins = [
+    "https://actaprocore.com",
+    "https://www.actaprocore.com",
+    "http://localhost",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,  # Permite tu dominio y local
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Permite todos los métodos (POST, GET, OPTIONS, etc.)
+    allow_headers=["*"],  # Permite todos los headers
 )
+
+# ==========================================
+# 0.1 Modelos Pydantic (Soluciona el error 500)
+# ==========================================
+class AuthModel(BaseModel):
+    email: str
+    password: str
+    plan: str = "free"
+
+class PaymentPreferenceModel(BaseModel):
+    email: str
+    plan_name: str
 
 # Configuración de Claves y Base de Datos
 AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
