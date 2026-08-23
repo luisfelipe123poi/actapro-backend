@@ -529,6 +529,10 @@ async def descargar_acta_pdf(acta_id: str, email: str):
         raise HTTPException(status_code=500, detail=f"Error interno al generar el PDF: {str(e)}")
 
 
+# ==========================================
+# 4. Endpoints de Pagos y Webhook (Mercado Pago + Brevo)
+# ==========================================
+
 @app.post("/api/crear-preferencia-pago")
 def crear_preferencia_pago(data: PaymentPreferenceModel):
     if not mp_sdk:
@@ -544,7 +548,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
         "básico": "basico",
         "plan basico": "basico",
         "plan básico": "basico",
-        "profesional": "profesional", # Corresponde a tu plan intermedio
+        "profesional": "profesional",
         "plan profesional": "profesional",
         "corporativo": "corporativo",
         "plan corporativo": "corporativo",
@@ -610,8 +614,13 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/webhook-mercadopago")
 async def webhook_mercadopago(request: Request):
+    """
+    Recibe notificaciones automáticas de Mercado Pago, consulta el API oficial,
+    detecta el plan, actualiza los contadores en MongoDB y envía un correo de confirmación con Brevo.
+    """
     try:
         body = await request.json()
         if body.get("type") == "payment":
@@ -637,11 +646,12 @@ async def webhook_mercadopago(request: Request):
                             elif "básico" in title_lower or "basico" in title_lower:
                                 plan_asignado = "basico"
 
-                        # Obtener configuración del plan desde PRECIOS_PLANES (o CONFIGURACION_PLANES)
+                        # Obtener configuración del plan desde PRECIOS_PLANES
                         info_plan = PRECIOS_PLANES.get(plan_asignado, PRECIOS_PLANES["basico"])
                         
                         tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
                         horas_otorgadas = info_plan.get("limite_horas", 15.0)
+                        precio_pagado = info_plan.get("precio", 0.0)
 
                         # Actualizar en la base de datos reseteando los contadores de uso actual
                         users_collection.update_one(
@@ -656,9 +666,35 @@ async def webhook_mercadopago(request: Request):
                                     "limite_horas_mes": horas_otorgadas,
                                 }
                             },
+                            upsert=True
                         )
+
+                        # Enviar Correo de Confirmación de Compra con Brevo
+                        nombre_usuario = payer_email.split("@")[0]
+                        asunto_correo = f"¡Compra exitosa! Plan {info_plan['nombre']} Activado"
+                        html_cuerpo = f"""
+                        <div style="font-family: Arial, sans-serif; color: #333; padding: 20px; max-width: 600px; margin: auto; border: 1px solid #eaeaea; border-radius: 8px;">
+                            <h2 style="color: #16a34a;">¡Gracias por tu compra, {nombre_usuario}!</h2>
+                            <p>Tu suscripción al plan <strong>{info_plan['nombre']}</strong> se ha procesado y activado correctamente.</p>
+                            <hr style="border: none; border-top: 1px solid #eaeaea; margin: 20px 0;">
+                            <p><strong>Detalles de la transacción:</strong></p>
+                            <ul>
+                                <li><strong>Plan:</strong> {info_plan['nombre']}</li>
+                                <li><strong>Monto pagado:</strong> ${precio_pagado} COP</li>
+                                <li><strong>Límite de Tokens:</strong> {tokens_otorgados}</li>
+                                <li><strong>Límite de Horas:</strong> {horas_otorgadas} hrs</li>
+                            </ul>
+                            <p>Ya puedes disfrutar de todas las funcionalidades ilimitadas de tu plataforma de actas inteligentes.</p>
+                            <br>
+                            <p style="font-size: 12px; color: #666;">Atentamente,<br>El equipo de ActaPro Core</p>
+                        </div>
+                        """
+                        enviar_correo_brevo(payer_email, nombre_usuario, asunto_correo, html_cuerpo)
+
+                        return {"status": "success", "message": f"Licencia de {payer_email} actualizada a {plan_asignado}"}
     except Exception as e:
-        print(f"Error en webhook: {e}")
+        print(f"Error en webhook de Mercado Pago: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
     return {"status": "ok"}
 
@@ -1874,64 +1910,6 @@ async def obtener_estadisticas_avanzadas():
         "cohortes": cohortes
     }
 
-@router.post("/webhook-mercadopago")
-async def webhook_mercadopago(request: Request):
-    """
-    Recibe notificaciones automáticas de Mercado Pago, consulta el API oficial,
-    detecta el plan y actualiza los contadores en la base de datos de MongoDB.
-    """
-    try:
-        body = await request.json()
-        if body.get("type") == "payment":
-            payment_id = body.get("data", {}).get("id")
-            if payment_id and mp_sdk:
-                payment_info = mp_sdk.payment().get(payment_id)
-                payment = payment_info.get("response", {})
-
-                if payment.get("status") == "approved":
-                    payer_email = payment.get("payer", {}).get("email") or payment.get("external_reference")
-                    if payer_email:
-                        items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
-                        
-                        # Plan por defecto si no se detecta explícitamente
-                        plan_asignado = "basico"
-
-                        for item in items:
-                            title_lower = item.get("title", "").lower()
-                            if "corporativo" in title_lower:
-                                plan_asignado = "corporativo"
-                            elif "profesional" in title_lower or "intermedio" in title_lower:
-                                plan_asignado = "profesional"
-                            elif "básico" in title_lower or "basico" in title_lower:
-                                plan_asignado = "basico"
-
-                        # Obtener configuración del plan desde PRECIOS_PLANES
-                        info_plan = PRECIOS_PLANES.get(plan_asignado, PRECIOS_PLANES["basico"])
-                        
-                        tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
-                        horas_otorgadas = info_plan.get("limite_horas", 15.0)
-
-                        # Actualizar en la base de datos reseteando los contadores de uso actual
-                        # users_collection.update_one(
-                        #     {"email": payer_email},
-                        #     {
-                        #         "$set": {
-                        #             "plan": plan_asignado,
-                        #             "activo": True,
-                        #             "tokens_usados": 0,
-                        #             "limite_tokens_mes": tokens_otorgados,
-                        #             "horas_usadas_mes": 0.0,
-                        #             "limite_horas_mes": horas_otorgadas,
-                        #         }
-                        #     },
-                        #     upsert=True
-                        # )
-                        return {"status": "success", "message": f"Licencia de {payer_email} actualizada a {plan_asignado}"}
-    except Exception as e:
-        print(f"Error en webhook de Mercado Pago: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    return {"status": "ok"}
 
 @router.get("/invoice/download/{email}")
 async def descargar_factura_pdf(email: str):
