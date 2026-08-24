@@ -1,11 +1,36 @@
-import os
-import io
-import re
+import datetime 
+import datetime
 import hashlib
+import os
 import shutil
 import uuid
 from typing import Optional
+import assemblyai as aai
+from docx import Document
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
+import mercadopago
+from openai import OpenAI
+from pydantic import BaseModel
+from pymongo import MongoClient
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
+import io
+from bson import ObjectId
+import re
 import datetime
+import hashlib
+import io
+import os
+import re
+import shutil
+import uuid
+from typing import Optional
 
 import assemblyai as aai
 from bson import ObjectId
@@ -20,22 +45,20 @@ import pymupdf as fitz
 from openai import OpenAI
 from pydantic import BaseModel
 from pymongo import MongoClient
-
-# Importaciones para Brevo
-from brevo import Brevo
-from brevo.transactional_emails import (
-    SendTransacEmailRequestSender,
-    SendTransacEmailRequestToItem,
-)
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 load_dotenv()
 
-# ==========================================
-# 0. Inicialización de la Aplicación FastAPI
-# ==========================================
 app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.5")
 
-# Configuración de CORS (Permite solicitudes desde tu frontend)
+
+# ==========================================
+# 0. Configuración de CORS (¡Soluciona el bloqueo!)
+# ==========================================
 origins = [
     "https://actaprocore.com",
     "https://www.actaprocore.com",
@@ -46,35 +69,120 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins,  # Permite tu dominio y local
+    allow_credentials=True,
+    allow_methods=["*"],  # Permite todos los métodos (POST, GET, OPTIONS, etc.)
+    allow_headers=["*"],  # Permite todos los headers
+)
+
+# ==========================================
+# 0.1 Modelos Pydantic (Soluciona el error 500)
+# ==========================================
+class AuthModel(BaseModel):
+    email: str
+    password: str
+    plan: str = "free"
+
+class PaymentPreferenceModel(BaseModel):
+    email: str
+    plan_name: str
+
+# Configuración de Claves y Base de Datos
+AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
+
+if not AAI_API_KEY or not OPENAI_API_KEY:
+  raise ValueError(
+      "❌ Error: Claves de API de AssemblyAI u OpenAI no configuradas en .env"
+  )
+
+# Inicializar cliente de MongoDB especificando la base de datos aislada 'actabot_db'
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client["actabot_db"]
+users_collection = db["users"]
+actas_collection = db["actas_historial"]
+transripciones_collection = db["transripciones_cache"]
+scanners_historial_collection = db["scanners_historial"]  # <--- NUEVA COLECCIÓN PARA ESCANEOS
+
+# Configurar índice TTL para eliminar automáticamente la caché de transcripciones pasados 30 días (2592000 segundos)
+try:
+  transripciones_collection.create_index(
+      "createdAt", expireAfterSeconds=2592000
+  )
+except Exception as e:
+  print(f"Nota sobre índice TTL: {e}")
+
+# Inicializar SDK de Mercado Pago
+mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
+
+aai.settings.api_key = AAI_API_KEY
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Prompt enfocado en máxima exhaustividad y cero resumen innecesario
+prompt_sistema = """
+Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
+Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
+
+ORDEN DE TRABAJO (ESTRICTO):
+1. INTEGRIDAD DE LA INFORMACIÓN: NO RESUMAS EL CONTENIDO TÉCNICO NI LAS PROPUESTAS. Debes capturar todos los argumentos, cifras, justificaciones financieras, propuestas de mantenimiento y posturas de los copropietarios. Si alguien propone algo específico, inclúyelo detalladamente.
+2. FILTRADO DE RUIDO: ÚNICAMENTE elimina interrupciones, saludos, chismes, peleas personales o frases vacías que no aporten al objeto de la asamblea. Todo lo que tenga que ver con gestión, presupuesto, administración o decisiones debe quedar plasmado.
+3. ESTRUCTURA JURÍDICA:
+   - ENCABEZADO Y QUÓRUM: Detalla la verificación de coeficientes si se menciona.
+   - DESARROLLO PUNTO POR PUNTO: Para CADA punto del orden del día, redacta el desarrollo de forma narrativa pero minuciosa. Transcribe los debates relevantes ("El copropietario A solicitó aclarar X; el administrador respondió que Y").
+   - DECISIONES Y VOTACIONES: Registra el sentido de las votaciones y cualquier salvedad o constancia que los copropietarios hayan solicitado dejar por escrito.
+4. ESTILO Y FORMATO: Lenguaje jurídico formal, impersonal y preciso. Utiliza asteriscos dobles (ej: **$1.500.000** o **Aprobado por mayoría**) para resaltar en el texto cifras, costos, valores y decisiones clave. Redacta como si hubieras estado presente tomando nota exhaustiva de todo lo importante.
+"""
+PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Tu objetivo es redactar un acta formal, jurídica y detallada a partir de la transcripción de la asamblea provista, asegurando un formato profesional en Markdown y cumplimiento legal estricto."""
+
+# Diccionario seguro de precios y planes controlados estrictamente en el backend
+PRECIOS_PLANES = {
+    "basico": {
+        "nombre": "Plan Básico",
+        "precio": 153000.0,
+        "tokens_mensuales": 100000,      # Actualizado a 100k tokens
+        "documentos_estimados": 40,      # Referencia para el usuario
+        "limite_horas": 15.0
+    },
+    "profesional": {
+        "nombre": "Plan Intermedio",      # Ajustado a "Intermedio" según tu tabla
+        "precio": 479000.0,
+        "tokens_mensuales": 300000,      # Actualizado a 300k tokens
+        "documentos_estimados": 120,     # Referencia para el usuario
+        "limite_horas": 60.0,
+    },
+    "corporativo": {
+        "nombre": "Plan Profesional / Pro", # Ajustado a "Pro" según tu tabla
+        "precio": 939000.0,
+        "tokens_mensuales": 1000000,     # Actualizado a 1M tokens
+        "documentos_estimados": 400,     # Referencia para el usuario
+        "limite_horas": 200.0,
+    },
+}
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import os
+import openai
+
+# 1. Inicialización obligatoria de FastAPI
+app = FastAPI(title="ActaProCore Soporte API")
+
+# Configuración de CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# 2. Configuración oficial del cliente de OpenAI para Python
+client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# ==========================================
-# 1. Modelos Pydantic
-# ==========================================
-class AuthModel(BaseModel):
-    email: str
-    password: str
-    plan: Optional[str] = "free"
-
-class PaymentPreferenceModel(BaseModel):
-    email: str
-    plan_name: str
-    price: Optional[float] = None
-
-class RenombrarActaRequest(BaseModel):
-    email: str
-    acta_id: str
-    nuevo_nombre: str
-
-class EliminarActaRequest(BaseModel):
-    email: str
-    acta_id: str
-
+# 3. Modelos Pydantic para validar los datos de entrada
 class ConsultaFAQRequest(BaseModel):
     tipoConsulta: str
 
@@ -83,52 +191,31 @@ class ConsultaPlanRequest(BaseModel):
     tipoProblema: str = None
 
 
-# ==========================================
-# 2. Configuración de Claves y Clientes externos
-# ==========================================
-AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
-BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
-if not AAI_API_KEY or not OPENAI_API_KEY:
-    raise ValueError("❌ Error: Claves de API de AssemblyAI u OpenAI no configuradas en .env")
-
-if not BREVO_API_KEY:
-    print("⚠️ Advertencia: BREVO_API_KEY no está configurada. Los correos no se enviarán.")
-
-# Inicializar Base de Datos MongoDB
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client["actabot_db"]
-
-users_collection = db["users"]
-actas_collection = db["actas_historial"]
-transripciones_collection = db["transripciones_cache"]
-scanners_historial_collection = db["scanners_historial"]
-
-try:
-    mongo_client.admin.command('ping')
-    print("Conexión exitosa a la base de datos de MongoDB: actabot_db")
-except Exception as e:
-    print(f"Error al conectar con MongoDB: {e}")
-
-# Configurar índice TTL para transripciones (30 días)
-try:
-    transripciones_collection.create_index("createdAt", expireAfterSeconds=2592000)
-except Exception as e:
-    print(f"Nota sobre índice TTL: {e}")
-
-# Inicializar SDKs de servicios externos
-mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
-aai.settings.api_key = AAI_API_KEY
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-brevo_client = Brevo(api_key=BREVO_API_KEY) if BREVO_API_KEY else None
+class AuthModel(BaseModel):
+  email: str
+  password: str
+  plan: Optional[str] = "free"
 
 
-# ==========================================
-# 3. Configuración de Planes y Diccionarios
-# ==========================================
+class PaymentPreferenceModel(BaseModel):
+  email: str
+  plan_name: str
+  price: Optional[float] = None
+
+
+class RenombrarActaRequest(BaseModel):
+  email: str
+  acta_id: str
+  nuevo_nombre: str
+
+
+class EliminarActaRequest(BaseModel):
+  email: str
+  acta_id: str
+
+
+# Estructura maestra de configuración
 CONFIGURACION_PLANES = {
     "free": {"tokens": 10000, "horas": 3.0},
     "basico": {"tokens": 100000, "horas": 15.0},
@@ -136,54 +223,22 @@ CONFIGURACION_PLANES = {
     "corporativo": {"tokens": 1000000, "horas": 200.0}
 }
 
-PRECIOS_PLANES = {
-    "basico": {
-        "nombre": "Plan Básico",
-        "precio": 153000.0,
-        "tokens_mensuales": 100000,
-        "documentos_estimados": 40,
-        "limite_horas": 15.0
-    },
-    "profesional": {
-        "nombre": "Plan Intermedio",
-        "precio": 479000.0,
-        "tokens_mensuales": 300000,
-        "documentos_estimados": 120,
-        "limite_horas": 60.0,
-    },
-    "corporativo": {
-        "nombre": "Plan Profesional / Pro",
-        "precio": 939000.0,
-        "tokens_mensuales": 1000000,
-        "documentos_estimados": 400,
-        "limite_horas": 200.0,
-    },
-}
-
-prompt_sistema = """
-Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
-Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
-"""
-
-PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Tu objetivo es redactar un acta formal, jurídica y detallada a partir de la transcripción de la asamblea provista, asegurando un formato profesional en Markdown y cumplimiento legal estricto."""
-
-
 # ==========================================
-# 4. Función Auxiliar para Enviar Correos con Brevo
+# 2. Función Auxiliar para Enviar Correos con Brevo
 # ==========================================
 def enviar_correo_brevo(destinatario_email: str, destinatario_nombre: str, asunto: str, html_contenido: str):
     """Envía un correo electrónico transaccional utilizando la API de Brevo."""
     if not brevo_client:
         print("Brevo no está inicializado (falta la API Key).")
         return False
-     
+    
     try:
         brevo_client.transactional_emails.send_transac_email(
             subject=asunto,
             html_content=html_contenido,
             sender=SendTransacEmailRequestSender(
                 name="ActaPro Core",
-                email="contacto@actaprocore.com"
+                email="no-reply@actaprocore.com"  # Reemplaza con tu correo o dominio verificado en Brevo
             ),
             to=[
                 SendTransacEmailRequestToItem(
@@ -197,6 +252,7 @@ def enviar_correo_brevo(destinatario_email: str, destinatario_nombre: str, asunt
     except Exception as e:
         print(f"Error al enviar correo mediante Brevo: {e}")
         return False
+
 
 # ==========================================
 # 3. Rutas de la Aplicación
@@ -709,22 +765,14 @@ def validar_calidad_audio(file_path: str):
 
 @app.post("/procesar")
 async def procesar_asamblea(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     instrucciones: Optional[str] = Form(""),
-    email: Optional[str] = Form(None),
+    email: str = Form(...),
     nombre_personalizado: Optional[str] = Form(None),
 ):
-    # Validación defensiva estricta para evitar que el 422 rompa de forma silenciosa
-    if not email:
-        raise HTTPException(
-            status_code=422,
-            detail="El campo 'email' es obligatorio y no fue recibido correctamente por el servidor."
-        )
-
     user = users_collection.find_one({"email": email})
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no autenticado en la base de datos.")
+        raise HTTPException(status_code=401, detail="Usuario no autenticado.")
 
     plan_usuario = user.get("plan", "free")
 
@@ -732,8 +780,7 @@ async def procesar_asamblea(
     os.makedirs("temp_outputs", exist_ok=True)
 
     session_id = str(uuid.uuid4())
-    safe_filename = file.filename or "audio_sin_nombre.mp3"
-    temp_audio_path = f"temp_uploads/{session_id}_{safe_filename}"
+    temp_audio_path = f"temp_uploads/{session_id}_{file.filename}"
 
     try:
         content_bytes = await file.read()
@@ -782,7 +829,7 @@ async def procesar_asamblea(
 
         # 2. Validar límite de duración por archivo individual según el plan
         limites_por_archivo = {
-            "free": 30,           # Máximo 30 min por archivo
+            "free": 30,          # Máximo 30 min por archivo
             "basico": 180,       # Máximo 3 horas por archivo
             "profesional": 300,  # Máximo 5 horas por archivo
             "corporativo": 600   # Máximo 10 horas por archivo
@@ -811,55 +858,169 @@ async def procesar_asamblea(
                 detail=f"Has alcanzado el límite de {limite_mes} horas mensuales de tu plan. Actualiza tu suscripción para seguir procesando actas."
             )
 
-        # Enviar la tarea al fondo con BackgroundTasks
-        background_tasks.add_task(
-            background_procesar_asamblea,
-            session_id=session_id,
-            temp_audio_path=temp_audio_path,
-            email=email,
-            instrucciones=instrucciones or "",
-            nombre_personalizado=nombre_personalizado,
-            duracion_segundos=duracion_segundos,
-            horas_usadas_mes=horas_usadas_mes,
-            content_bytes=content_bytes,
-            filename=safe_filename,
-            openai_client=client,
-            PROMPT_SISTEMA_ACTAS=PROMPT_SISTEMA_ACTAS
+        # Caché de transcripción para evitar gastos duplicados en AssemblyAI
+        file_hash = hashlib.sha256(content_bytes).hexdigest()
+        cached_transcription = transripciones_collection.find_one(
+            {"file_hash": file_hash}
         )
 
-        return JSONResponse(
-            status_code=202,
-            content={
-                "status": "accepted",
-                "session_id": session_id,
-                "message": "El audio se está procesando en segundo plano."
-            }
-        )
+        if cached_transcription:
+            print(
+                "💡 Audio duplicado detectado: Reutilizando transcripción guardada"
+                " para evitar gasto en AssemblyAI."
+            )
+            texto_transcrito = cached_transcription["texto_transcrito"]
+        else:
+            config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
+            transcriber = aai.Transcriber()
+            transcript = transcriber.transcribe(temp_audio_path, config=config)
 
-    except HTTPException as he:
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
-        raise he
-    except Exception as e:
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
-        raise HTTPException(status_code=500, detail=str(e))
-        
-@app.get("/estado-acta/{session_id}")
-async def verificar_estado_acta(session_id: str):
-    acta = actas_collection.find_one({"session_id": session_id}, {"_id": 0})
-    if not acta:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada.")
-    return acta
+            if transcript.status == aai.TranscriptStatus.error:
+                raise HTTPException(
+                    status_code=500, detail=f"Error en AssemblyAI: {transcript.error}"
+                )
 
+            texto_transcrito = ""
+            if transcript.utterances:
+                for utterance in transcript.utterances:
+                    texto_transcrito += (
+                        f"[Persona {utterance.speaker}]: {utterance.text}\n"
+                    )
+            else:
+                texto_transcrito = transcript.text
 
-@app.get("/estado-escanear/{scanner_id}")
-async def verificar_estado_escanear(scanner_id: str):
-    escaneo = scanners_historial_collection.find_one({"scanner_id": scanner_id}, {"_id": 0})
-    if not escaneo:
-        raise HTTPException(status_code=404, detail="Escaneo no encontrado.")
-    return escaneo
+            transripciones_collection.insert_one({
+                "file_hash": file_hash,
+                "filename": file.filename,
+                "texto_transcrito": texto_transcrito,
+                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "createdAt": datetime.utcnow(),
+            })
+
+        # Lógica de nombre del acta
+        if not nombre_personalizado or nombre_personalizado.strip() == "":
+            try:
+                prompt_nombre = f"""
+                Analiza el siguiente fragmento de transcripción de una asamblea y extrae estrictamente el nombre del edificio, conjunto residencial, copropiedad o empresa mencionada. 
+                Responde ÚNICAMENTE con un nombre limpio apto para archivo (sin espacios, usa guiones bajos _, sin tildes ni caracteres especiales, por ejemplo: Acta_Asamblea_Edificio_Torre_Central).
                 
+                Transcripción:
+                {texto_transcrito[:2500]}...
+                """
+                resp_nombre = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt_nombre}],
+                    temperature=0.2,
+                )
+                nombre_ia = (
+                    resp_nombre.choices[0]
+                    .message.content.strip()
+                    .replace(" ", "_")
+                )
+                nombre_ia = "".join(
+                    c for c in nombre_ia if c.isalnum() or c in ("_", "-")
+                )
+                nombre_archivo_acta = (
+                    f"{nombre_ia}.docx"
+                    if nombre_ia
+                    else f"Acta_Asamblea_{session_id[:8]}.docx"
+                )
+            except Exception:
+                nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
+        else:
+            nombre_limpio = nombre_personalizado.strip().replace(" ", "_")
+            nombre_limpio = "".join(
+                c for c in nombre_limpio if c.isalnum() or c in ("_", "-", ".")
+            )
+            nombre_base = nombre_limpio.replace(".docx", "")
+            nombre_archivo_acta = f"{nombre_base}.docx"
+
+        output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
+
+        prompt_sistema = PROMPT_SISTEMA_ACTAS
+        if instrucciones:
+            prompt_sistema += (
+                f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
+            )
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt_sistema},
+                {
+                    "role": "user",
+                    "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}",
+                },
+            ],
+            temperature=0.3,
+        )
+
+        acta_final = response.choices[0].message.content
+
+        doc = Document()
+        titulo_principal = doc.add_heading(
+            "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0
+        )
+        titulo_principal.alignment = 1
+
+        for linea in acta_final.split("\n"):
+            linea_clean = linea.strip()
+            if not linea_clean:
+                continue
+
+            if linea_clean.startswith("# "):
+                doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
+            elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
+                doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
+            else:
+                p = doc.add_paragraph()
+                if "**" in linea_clean:
+                    partes = linea_clean.split("**")
+                    for i, parte in enumerate(partes):
+                        if parte:
+                            run = p.add_run(parte)
+                            if i % 2 == 1:
+                                run.bold = True
+                else:
+                    p.add_run(linea_clean)
+
+        doc.save(output_docx_path)
+
+        peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
+
+        data_acta = {
+            "email": email,
+            "nombre_acta": nombre_archivo_acta,
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "peso": peso_archivo,
+            "contenido": acta_final,
+        }
+        actas_collection.insert_one(data_acta)
+
+        # 4. Actualizar consumo mensual de horas sumando la duración real del audio procesado
+        nuevas_horas = horas_usadas_mes + (duracion_segundos / 3600.0)
+        users_collection.update_one(
+            {"email": email}, 
+            {"$set": {"horas_usadas_mes": nuevas_horas}}
+        )
+
+        return FileResponse(
+            path=output_docx_path,
+            filename=nombre_archivo_acta,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.Document"
+            ),
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
 
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
@@ -930,7 +1091,6 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 @app.post("/escanear")
 async def escanear_documento(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...), 
     email: Optional[str] = Form(None)
 ):
@@ -948,48 +1108,134 @@ async def escanear_documento(
                         detail="Has alcanzado el límite de tokens mensuales de tu plan. Actualiza tu suscripción para continuar."
                     )
 
-        # 1. Leer los bytes del archivo subido desde el frontend de inmediato
+        # 1. Leer los bytes del archivo subido desde el frontend
         file_bytes = await file.read()
         filename = file.filename.lower()
-        scanner_id = str(uuid.uuid4())
+        
+        texto_extraido = ""
+        es_imagen = filename.endswith((".png", ".jpg", ".jpeg", ".webp"))
+        
+        # 2. Extracción según el formato del archivo
+        if es_imagen:
+            base64_image = base64.b64encode(file_bytes).decode("utf-8")
+            contenido_usuario = [
+                {
+                    "type": "text",
+                    "text": "Analyze this scanned document or image. Extract the information by structuring the visual design with corporate semantic HTML tags (use <h1>, <h2>, <p>, <table>, <thead>, <tbody>, <tr>, <th>, <td>). Apply Tailwind CSS classes to maintain a professional style (e.g., fonts, clean borders, spacing). DO NOT use Markdown, DO NOT use asterisks, DO NOT use code blocks of any kind. If there are data tables, create them completely with HTML tags. If you detect statistical charts or diagrams, represent them with a structured div with the class 'p-4 border-2 border-dashed border-slate-300 bg-slate-50 text-center text-slate-500 rounded-lg text-xs my-4' indicating the content of the chart."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                }
+            ]
+        else:
+            if filename.endswith(".pdf"):
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    texto_pagina = page.get_text()
+                    
+                    if texto_pagina.strip():
+                        texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
+                
+                doc.close()
+                
+                # Respaldo con pdfplumber para extracción precisa de tablas en PDFs
+                if len(texto_extraido.strip()) < 50:
+                    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                        for i, page in enumerate(pdf.pages):
+                            t = page.extract_text()
+                            if t:
+                                texto_extraido += f"\n--- Página (Tablas) {i + 1} ---\n" + t
 
-        # 2. Registrar estado inicial "procesando" en la base de datos si hay email
+            elif filename.endswith((".txt", ".doc", ".docx")):
+                texto_extraido = file_bytes.decode("utf-8", errors="ignore")
+            else:
+                raise HTTPException(status_code=400, detail="Formato de archivo no soportado. Sube un PDF, imagen o documento de texto.")
+
+            if not texto_extraido.strip():
+                raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
+
+            contenido_usuario = f"""Analyze the following text extracted from the document. Your output must be EXCLUSIVELY corporate semantic HTML ready to render directly in a browser or web container.
+- Replicate the original visual and section structure.
+- Use <h1>, <h2> for main and section titles.
+- Use <p> for paragraphs with Tailwind classes (e.g., text-slate-900, text-xs, leading-relaxed).
+- Use complete table tags (<table>, <thead>, <tbody>, <tr>, <td>) with borders and corporate classes if there is structured data.
+- If you detect references to charts, schemes, or diagrams, create them as a visual block with a dotted border.
+- FORBIDDEN to use Markdown, asterisks (*), markdown list hyphens (#), or wrap the result in markdown code quotes.
+
+Extracted text:
+{texto_extraido[:15000]}"""
+
+        # 3. Procesamiento inteligente y estructurado con OpenAI GPT-4o
+        response_openai = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are a Documentation Engineer and Web Designer expert in corporate digitalization. 
+Your sole mission is to transform the input document information into a pure, clean, and professional HTML code block integrated with Tailwind CSS classes.
+STRICT RULES:
+1. Return ONLY valid HTML code. Do not include prior explanations or text outside of the HTML.
+2. NEVER use Markdown syntax (*, #, -, ```html). The result must be plain text containing exclusively HTML markup.
+3. Structure data tables with <table>, <thead>, <tbody>, <tr>, <th>, and <td> applying clean classes (e.g., border border-slate-300 p-2).
+4. Represent detected charts using a <div> container with dotted borders and professional design.
+5. Maintain absolute fidelity to the original document structure."""
+                },
+                {
+                    "role": "user",
+                    "content": contenido_usuario
+                }
+            ],
+            temperature=0.0
+        )
+
+        resultado_html = response_openai.choices[0].message.content.strip()
+
+        # Descontar / sumar tokens consumidos en la BD si el usuario está autenticado
+        tokens_consumidos = 0
+        if email and hasattr(response_openai, "usage") and response_openai.usage:
+            tokens_consumidos = response_openai.usage.total_tokens
+            users_collection.update_one(
+                {"email": email},
+                {"$inc": {"tokens_usados": tokens_consumidos}}
+            )
+
+        # Limpieza defensiva por si el modelo por inercia agrega bloques de código
+        if resultado_html.startswith("```html"):
+            resultado_html = resultado_html[7:]
+        if resultado_html.startswith("```"):
+            resultado_html = resultado_html[3:]
+        if resultado_html.endswith("```"):
+            resultado_html = resultado_html[:-3]
+        resultado_html = resultado_html.strip()
+
+        # Guardar automáticamente en la colección de scanners si hay email
+        scanner_id = None
         if email:
             nuevo_registro = {
-                "scanner_id": scanner_id,
                 "email": email,
                 "nombre": file.filename or "Documento Escaneado",
-                "estado": "procesando",
                 "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "tokens": 0,
-                "contenido": ""
+                "tokens": tokens_consumidos,
+                "contenido": resultado_html
             }
-            scanners_historial_collection.insert_one(nuevo_registro)
+            resultado_db = scanners_historial_collection.insert_one(nuevo_registro)
+            scanner_id = str(resultado_db.inserted_id)
 
-        # 3. Delegar la tarea pesada al fondo usando BackgroundTasks
-        background_tasks.add_task(
-            background_escanear_documento,
-            scanner_id=scanner_id,
-            file_bytes=file_bytes,
-            filename=filename,
-            email=email,
-            client_openai=client  # Asegúrate de que apunte a tu cliente global de OpenAI (client o openai_client)
-        )
-
-        # 4. Retornar respuesta inmediata al Frontend (Status 202 Accepted)
-        return JSONResponse(
-            status_code=202,
-            content={
-                "status": "accepted",
-                "scanner_id": scanner_id,
-                "message": "El documento se está escaneando en segundo plano."
-            }
-        )
+        # 4. Retornar el HTML estructurado al Frontend
+        return {
+            "status": "success",
+            "transcripcion": resultado_html,
+            "id": scanner_id
+        }
 
     except HTTPException as he:
         raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error iniciando escaneo: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando el archivo: {str(e)}")
         
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
