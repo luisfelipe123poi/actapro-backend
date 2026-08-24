@@ -92,6 +92,7 @@ AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
+brevo_client = Brevo(api_key=BREVO_API_KEY) if BREVO_API_KEY else None
 
 if not AAI_API_KEY or not OPENAI_API_KEY:
   raise ValueError(
