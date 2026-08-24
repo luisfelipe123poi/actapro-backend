@@ -1,28 +1,3 @@
-import datetime 
-import datetime
-import hashlib
-import os
-import shutil
-import uuid
-from typing import Optional
-import assemblyai as aai
-from docx import Document
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
-import mercadopago
-from openai import OpenAI
-from pydantic import BaseModel
-from pymongo import MongoClient
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
-import io
-from bson import ObjectId
-import re
 import datetime
 import hashlib
 import io
@@ -40,10 +15,10 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 import mercadopago
+import openai
+from openai import OpenAI
 import pdfplumber
 import pymupdf as fitz
-from openai import OpenAI
-from pydantic import BaseModel
 from pymongo import MongoClient
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
 from reportlab.lib.pagesizes import letter
@@ -52,15 +27,16 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
+from sib_api_v3_sdk.models import SendSmtpEmail, SendSmtpEmailSender, SendSmtpEmailTo
 
 load_dotenv()
 
-app = FastAPI(title="ActaBot PH con MongoDB y Mercado Pago", version="1.9.5")
-
-
 # ==========================================
-# 0. Configuración de CORS (¡Soluciona el bloqueo!)
+# 0. Inicialización y Configuración General
 # ==========================================
+app = FastAPI(title="ActaProCore API con MongoDB y Mercado Pago", version="1.9.5")
+
+# Configuración de CORS
 origins = [
     "https://actaprocore.com",
     "https://www.actaprocore.com",
@@ -71,160 +47,100 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # Permite tu dominio y local
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],  # Permite todos los métodos (POST, GET, OPTIONS, etc.)
-    allow_headers=["*"],  # Permite todos los headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-
-# ==========================================
-# 0.1 Modelos Pydantic (Soluciona el error 500)
-# ==========================================
-class AuthModel(BaseModel):
-    email: str
-    password: str
-    plan: str = "free"
-
-class PaymentPreferenceModel(BaseModel):
-    email: str
-    plan_name: str
 
 # Configuración de Claves y Base de Datos
 AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
 if not AAI_API_KEY or not OPENAI_API_KEY:
-  raise ValueError(
-      "❌ Error: Claves de API de AssemblyAI u OpenAI no configuradas en .env"
-  )
+    raise ValueError(
+        "❌ Error: Claves de API de AssemblyAI u OpenAI no configuradas en .env"
+    )
 
-# Inicializar cliente de MongoDB especificando la base de datos aislada 'actabot_db'
+# Inicializar cliente de MongoDB especificando la base de datos 'actabot_db'
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["actabot_db"]
 users_collection = db["users"]
 actas_collection = db["actas_historial"]
 transripciones_collection = db["transripciones_cache"]
-scanners_historial_collection = db["scanners_historial"]  # <--- NUEVA COLECCIÓN PARA ESCANEOS
+scanners_historial_collection = db["scanners_historial"]
 
-# Configurar índice TTL para eliminar automáticamente la caché de transcripciones pasados 30 días (2592000 segundos)
+# Configurar índice TTL para caché de transcripciones
 try:
-  transripciones_collection.create_index(
-      "createdAt", expireAfterSeconds=2592000
-  )
+    transripciones_collection.create_index(
+        "createdAt", expireAfterSeconds=2592000
+    )
 except Exception as e:
-  print(f"Nota sobre índice TTL: {e}")
+    print(f"Nota sobre índice TTL: {e}")
 
-# 1. Configura tu API Key de Brevo (cámbiala por tu variable de entorno real)
-configuration = sib_api_v3_sdk.Configuration()
-configuration.api_key['api-key'] = os.getenv("BREVO_API_KEY")
+# ==========================================
+# 1. Configuración de Brevo (Cliente Global)
+# ==========================================
+brevo_client = None
+if BREVO_API_KEY:
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = BREVO_API_KEY
+    brevo_client = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+else:
+    print("⚠️ Advertencia: BREVO_API_KEY no está configurada. Los correos electrónicos no se enviarán.")
 
-# 2. Define la variable que te está faltando globalmente
-brevo_client = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
-
-# Inicializar SDK de Mercado Pago
+# Inicializar SDK de Mercado Pago y Clientes de IA
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
 aai.settings.api_key = AAI_API_KEY
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Prompt enfocado en máxima exhaustividad y cero resumen innecesario
+# ==========================================
+# 2. Prompts y Diccionarios de Configuración
+# ==========================================
 prompt_sistema = """
 Eres un Secretario Jurídico de alto nivel, experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
 Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, DETALLADA Y COMPLETA. 
 
 ORDEN DE TRABAJO (ESTRICTO):
 1. INTEGRIDAD DE LA INFORMACIÓN: NO RESUMAS EL CONTENIDO TÉCNICO NI LAS PROPUESTAS. Debes capturar todos los argumentos, cifras, justificaciones financieras, propuestas de mantenimiento y posturas de los copropietarios. Si alguien propone algo específico, inclúyelo detalladamente.
-2. FILTRADO DE RUIDO: ÚNICAMENTE elimina interrupciones, saludos, chismes, peleas personales o frases vacías que no aporten al objeto de la asamblea. Todo lo que tenga que ver con gestión, presupuesto, administración o decisiones debe quedar plasmado.
+2. FILTRADO DE RUIDO: ÚNICAMENTE elimina interrupciones, saludos, chismes, peleas personales o frases vacías que não aporten al objeto de la asamblea. Todo lo que tenga que ver con gestión, presupuesto, administración o decisiones debe quedar plasmado.
 3. ESTRUCTURA JURÍDICA:
    - ENCABEZADO Y QUÓRUM: Detalla la verificación de coeficientes si se menciona.
    - DESARROLLO PUNTO POR PUNTO: Para CADA punto del orden del día, redacta el desarrollo de forma narrativa pero minuciosa. Transcribe los debates relevantes ("El copropietario A solicitó aclarar X; el administrador respondió que Y").
    - DECISIONES Y VOTACIONES: Registra el sentido de las votaciones y cualquier salvedad o constancia que los copropietarios hayan solicitado dejar por escrito.
 4. ESTILO Y FORMATO: Lenguaje jurídico formal, impersonal y preciso. Utiliza asteriscos dobles (ej: **$1.500.000** o **Aprobado por mayoría**) para resaltar en el texto cifras, costos, valores y decisiones clave. Redacta como si hubieras estado presente tomando nota exhaustiva de todo lo importante.
 """
+
 PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Tu objetivo es redactar un acta formal, jurídica y detallada a partir de la transcripción de la asamblea provista, asegurando un formato profesional en Markdown y cumplimiento legal estricto."""
 
-# Diccionario seguro de precios y planes controlados estrictamente en el backend
 PRECIOS_PLANES = {
     "basico": {
         "nombre": "Plan Básico",
         "precio": 153000.0,
-        "tokens_mensuales": 100000,      # Actualizado a 100k tokens
-        "documentos_estimados": 40,      # Referencia para el usuario
+        "tokens_mensuales": 100000,
+        "documentos_estimados": 40,
         "limite_horas": 15.0
     },
     "profesional": {
-        "nombre": "Plan Intermedio",      # Ajustado a "Intermedio" según tu tabla
+        "nombre": "Plan Intermedio",
         "precio": 479000.0,
-        "tokens_mensuales": 300000,      # Actualizado a 300k tokens
-        "documentos_estimados": 120,     # Referencia para el usuario
+        "tokens_mensuales": 300000,
+        "documentos_estimados": 120,
         "limite_horas": 60.0,
     },
     "corporativo": {
-        "nombre": "Plan Profesional / Pro", # Ajustado a "Pro" según tu tabla
+        "nombre": "Plan Profesional / Pro",
         "precio": 939000.0,
-        "tokens_mensuales": 1000000,     # Actualizado a 1M tokens
-        "documentos_estimados": 400,     # Referencia para el usuario
+        "tokens_mensuales": 1000000,
+        "documentos_estimados": 400,
         "limite_horas": 200.0,
     },
 }
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import os
-import openai
-
-# 1. Inicialización obligatoria de FastAPI
-app = FastAPI(title="ActaProCore Soporte API")
-
-# Configuración de CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 2. Configuración oficial del cliente de OpenAI para Python
-client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-# 3. Modelos Pydantic para validar los datos de entrada
-class ConsultaFAQRequest(BaseModel):
-    tipoConsulta: str
-
-class ConsultaPlanRequest(BaseModel):
-    clienteId: str
-    tipoProblema: str = None
-
-
-
-class AuthModel(BaseModel):
-  email: str
-  password: str
-  plan: Optional[str] = "free"
-
-
-class PaymentPreferenceModel(BaseModel):
-  email: str
-  plan_name: str
-  price: Optional[float] = None
-
-
-class RenombrarActaRequest(BaseModel):
-  email: str
-  acta_id: str
-  nuevo_nombre: str
-
-
-class EliminarActaRequest(BaseModel):
-  email: str
-  acta_id: str
-
-
-# Estructura maestra de configuración
 CONFIGURACION_PLANES = {
     "free": {"tokens": 10000, "horas": 3.0},
     "basico": {"tokens": 100000, "horas": 15.0},
@@ -233,36 +149,59 @@ CONFIGURACION_PLANES = {
 }
 
 # ==========================================
-# 2. Función Auxiliar para Enviar Correos con Brevo
+# 3. Modelos Pydantic
+# ==========================================
+class AuthModel(BaseModel):
+    email: str
+    password: str
+    plan: Optional[str] = "free"
+
+class PaymentPreferenceModel(BaseModel):
+    email: str
+    plan_name: str
+    price: Optional[float] = None
+
+class RenombrarActaRequest(BaseModel):
+    email: str
+    acta_id: str
+    nuevo_nombre: str
+
+class EliminarActaRequest(BaseModel):
+    email: str
+    acta_id: str
+
+class ConsultaFAQRequest(BaseModel):
+    tipoConsulta: str
+
+class ConsultaPlanRequest(BaseModel):
+    clienteId: str
+    tipoProblema: str = None
+
+# ==========================================
+# 4. Función Auxiliar para Enviar Correos con Brevo
 # ==========================================
 def enviar_correo_brevo(destinatario_email: str, destinatario_nombre: str, asunto: str, html_contenido: str):
-    """Envía un correo electrónico transaccional utilizando la API de Brevo."""
+    """Envía un correo electrónico transaccional utilizando la API oficial de Brevo."""
     if not brevo_client:
-        print("Brevo no está inicializado (falta la API Key).")
+        print("Brevo no está inicializado (falta la BREVO_API_KEY).")
         return False
     
     try:
-        brevo_client.transactional_emails.send_transac_email(
+        email_data = SendSmtpEmail(
+            sender=SendSmtpEmailSender(name="ActaPro Core", email="contacto@actaprocore.com"),
+            to=[SendSmtpEmailTo(email=destinatario_email, name=destinatario_nombre)],
             subject=asunto,
-            html_content=html_contenido,
-            sender=SendTransacEmailRequestSender(
-                name="ActaPro Core",
-                email="contacto@actaprocore.com"  # Reemplaza con tu correo o dominio verificado en Brevo
-            ),
-            to=[
-                SendTransacEmailRequestToItem(
-                    email=destinatario_email,
-                    name=destinatario_nombre
-                )
-            ]
+            html_content=html_contenido
         )
+        brevo_client.send_transac_email(email_data)
         print(f"Correo enviado exitosamente a {destinatario_email}")
         return True
-    except Exception as e:
-        print(f"Error al enviar correo mediante Brevo: {e}")
+    except ApiException as e:
+        print(f"Error de API al enviar correo mediante Brevo: {e}")
         return False
-
-
+    except Exception as e:
+        print(f"Error general al enviar correo mediante Brevo: {e}")
+        return False
 # ==========================================
 # 3. Rutas de la Aplicación
 # ==========================================
