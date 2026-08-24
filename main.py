@@ -712,12 +712,19 @@ async def procesar_asamblea(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     instrucciones: Optional[str] = Form(""),
-    email: str = Form(...),
+    email: Optional[str] = Form(""),
     nombre_personalizado: Optional[str] = Form(None),
 ):
+    # Verificación defensiva por si el email llegara vacío del frontend
+    if not email or email.strip() == "":
+        raise HTTPException(
+            status_code=422, 
+            detail="El campo 'email' es obligatorio y no llegó en la petición."
+        )
+
     user = users_collection.find_one({"email": email})
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no autenticado.")
+        raise HTTPException(status_code=401, detail="Usuario no autenticado o no encontrado.")
 
     plan_usuario = user.get("plan", "free")
 
@@ -725,7 +732,8 @@ async def procesar_asamblea(
     os.makedirs("temp_outputs", exist_ok=True)
 
     session_id = str(uuid.uuid4())
-    temp_audio_path = f"temp_uploads/{session_id}_{file.filename}"
+    safe_filename = file.filename if file.filename else "audio.mp3"
+    temp_audio_path = f"temp_uploads/{session_id}_{safe_filename}"
 
     try:
         content_bytes = await file.read()
@@ -774,7 +782,7 @@ async def procesar_asamblea(
 
         # 2. Validar límite de duración por archivo individual según el plan
         limites_por_archivo = {
-            "free": 30,           # Máximo 30 min por archivo
+            "free": 30,          # Máximo 30 min por archivo
             "basico": 180,       # Máximo 3 horas por archivo
             "profesional": 300,  # Máximo 5 horas por archivo
             "corporativo": 600   # Máximo 10 horas por archivo
@@ -809,12 +817,12 @@ async def procesar_asamblea(
             session_id=session_id,
             temp_audio_path=temp_audio_path,
             email=email,
-            instrucciones=instrucciones,
-            nombre_personalizado=nombre_personalizado,
+            instrucciones=instrucciones or "",
+            nombre_personalizado=nombre_personalizado or "",
             duracion_segundos=duracion_segundos,
             horas_usadas_mes=horas_usadas_mes,
             content_bytes=content_bytes,
-            filename=file.filename,
+            filename=safe_filename,
             openai_client=client,
             PROMPT_SISTEMA_ACTAS=PROMPT_SISTEMA_ACTAS
         )
