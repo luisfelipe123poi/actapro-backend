@@ -253,7 +253,7 @@ def enviar_correo_brevo(destinatario_email: str, destinatario_nombre: str, asunt
             html_content=html_contenido,
             sender=SendTransacEmailRequestSender(
                 name="ActaPro Core",
-                email="no-reply@actaprocore.com"  # Reemplaza con tu correo o dominio verificado en Brevo
+                email="contacto@actaprocore.com"  # Reemplaza con tu correo o dominio verificado en Brevo
             ),
             to=[
                 SendTransacEmailRequestToItem(
