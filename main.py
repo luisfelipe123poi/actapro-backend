@@ -50,6 +50,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 
 load_dotenv()
 
@@ -113,6 +115,13 @@ try:
   )
 except Exception as e:
   print(f"Nota sobre índice TTL: {e}")
+
+# 1. Configura tu API Key de Brevo (cámbiala por tu variable de entorno real)
+configuration = sib_api_v3_sdk.Configuration()
+configuration.api_key['api-key'] = os.getenv("BREVO_API_KEY")
+
+# 2. Define la variable que te está faltando globalmente
+brevo_client = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
 
 # Inicializar SDK de Mercado Pago
 mp_sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
