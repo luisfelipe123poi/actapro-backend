@@ -6,7 +6,8 @@ import re
 import shutil
 import uuid
 from typing import Optional
-
+from pydantic import BaseModel
+from typing import Optional
 import assemblyai as aai
 from bson import ObjectId
 from docx import Document
