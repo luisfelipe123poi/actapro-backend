@@ -712,19 +712,19 @@ async def procesar_asamblea(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     instrucciones: Optional[str] = Form(""),
-    email: Optional[str] = Form(""),
+    email: Optional[str] = Form(None),
     nombre_personalizado: Optional[str] = Form(None),
 ):
-    # Verificación defensiva por si el email llegara vacío del frontend
-    if not email or email.strip() == "":
+    # Validación defensiva estricta para evitar que el 422 rompa de forma silenciosa
+    if not email:
         raise HTTPException(
-            status_code=422, 
-            detail="El campo 'email' es obligatorio y no llegó en la petición."
+            status_code=422,
+            detail="El campo 'email' es obligatorio y no fue recibido correctamente por el servidor."
         )
 
     user = users_collection.find_one({"email": email})
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no autenticado o no encontrado.")
+        raise HTTPException(status_code=401, detail="Usuario no autenticado en la base de datos.")
 
     plan_usuario = user.get("plan", "free")
 
@@ -732,7 +732,7 @@ async def procesar_asamblea(
     os.makedirs("temp_outputs", exist_ok=True)
 
     session_id = str(uuid.uuid4())
-    safe_filename = file.filename if file.filename else "audio.mp3"
+    safe_filename = file.filename or "audio_sin_nombre.mp3"
     temp_audio_path = f"temp_uploads/{session_id}_{safe_filename}"
 
     try:
@@ -782,7 +782,7 @@ async def procesar_asamblea(
 
         # 2. Validar límite de duración por archivo individual según el plan
         limites_por_archivo = {
-            "free": 30,          # Máximo 30 min por archivo
+            "free": 30,           # Máximo 30 min por archivo
             "basico": 180,       # Máximo 3 horas por archivo
             "profesional": 300,  # Máximo 5 horas por archivo
             "corporativo": 600   # Máximo 10 horas por archivo
@@ -818,7 +818,7 @@ async def procesar_asamblea(
             temp_audio_path=temp_audio_path,
             email=email,
             instrucciones=instrucciones or "",
-            nombre_personalizado=nombre_personalizado or "",
+            nombre_personalizado=nombre_personalizado,
             duracion_segundos=duracion_segundos,
             horas_usadas_mes=horas_usadas_mes,
             content_bytes=content_bytes,
@@ -844,7 +844,7 @@ async def procesar_asamblea(
         if os.path.exists(temp_audio_path):
             os.remove(temp_audio_path)
         raise HTTPException(status_code=500, detail=str(e))
-
+        
 @app.get("/estado-acta/{session_id}")
 async def verificar_estado_acta(session_id: str):
     acta = actas_collection.find_one({"session_id": session_id}, {"_id": 0})
