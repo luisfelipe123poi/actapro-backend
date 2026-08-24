@@ -13,3 +13,4 @@ pdfplumber
 pydub
 ffmpeg-python==0.2.0
 brevo-python
+python-multipart
