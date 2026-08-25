@@ -57,18 +57,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
+from fastapi import Response
 
-@app.exception_handler(Exception)
-async def custom_general_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content={"detail": f"Error interno del servidor: {str(exc)}"},
+# Manejador explícito para peticiones preflight (OPTIONS)
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    return Response(
+        status_code=200,
         headers={
-            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Origin": "https://actaprocore.com",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
             "Access-Control-Allow-Credentials": "true",
-        }
+        },
     )
 
 # Configuración de Claves y Base de Datos
