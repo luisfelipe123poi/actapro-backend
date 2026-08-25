@@ -1122,7 +1122,6 @@ from fastapi import FastAPI, HTTPException
 from celery.result import AsyncResult
 from celery_app import celery_app
 
-app = FastAPI()
 
 # Asegurar que exista el directorio para audios temporales
 os.makedirs("temp_uploads", exist_ok=True)
