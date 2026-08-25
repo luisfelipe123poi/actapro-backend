@@ -892,10 +892,12 @@ from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
 
+# Importa tu tarea de celery
+from tasks import task_procesar_asamblea, celery_app
+
 TEMP_DIR = Path("temp_uploads")
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# Un solo handler para ambos endpoints
 @app.post("/procesar-asamblea")
 @app.post("/procesar")
 async def procesar_asamblea(
@@ -904,18 +906,19 @@ async def procesar_asamblea(
     instrucciones: Optional[str] = Form(None),
     nombre_personalizado: Optional[str] = Form(None)
 ):
+    temp_audio_path = None
     try:
         # Generar un nombre único para evitar colisiones en disco
         file_extension = Path(file.filename).suffix
         unique_filename = f"{uuid.uuid4()}{file_extension}"
-        temp_audio_path = str(TEMP_DIR / unique_filename)
+        temp_audio_path = str(TEMP_DIR.resolve() / unique_filename)
 
-        # Escritura por chunks para no colapsar la RAM con audios pesados
+        # Escritura por chunks para no colapsar la RAM
         with open(temp_audio_path, "wb") as buffer:
             while chunk := await file.read(1024 * 1024):  # Chunks de 1MB
                 buffer.write(chunk)
 
-        # Disparar la tarea en Celery
+        # Disparar la tarea en Celery pasando rutas absolutas seguras
         task = task_procesar_asamblea.delay(
             temp_audio_path=temp_audio_path,
             email=email,
@@ -931,8 +934,7 @@ async def procesar_asamblea(
         }
 
     except Exception as e:
-        # Si falló la subida, limpiar el archivo parcial si alcanzó a crearse
-        if 'temp_audio_path' in locals() and os.path.exists(temp_audio_path):
+        if temp_audio_path and os.path.exists(temp_audio_path):
             os.remove(temp_audio_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
