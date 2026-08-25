@@ -7,14 +7,13 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel
-from typing import Optional
 import assemblyai as aai
 from bson import ObjectId
 from docx import Document
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 import mercadopago
 import openai
 from openai import OpenAI
@@ -35,13 +34,14 @@ load_dotenv()
 # ==========================================
 # 0. Inicialización y Configuración General
 # ==========================================
+
+# REMOVIDO: redirect_slashes=False (para dejar que FastAPI resuelva coincidencias normales)
 app = FastAPI(
     title="ActaProCore API con MongoDB y Mercado Pago", 
-    version="1.9.5",
-    redirect_slashes=False
+    version="1.9.5"
 )
 
-# Configuración de CORS
+# Lista de orígenes permitidos
 origins = [
     "https://actaprocore.com",
     "https://www.actaprocore.com",
@@ -53,14 +53,17 @@ origins = [
     "http://127.0.0.1:3000"
 ]
 
+# Configuración correcta de CORS usando la variable origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://actaprocore.com", "http://localhost:3000"],
+    allow_origins=origins,  # 👈 Usamos la lista completa definida arriba
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ELIMINADO: @app.options("/{full_path:path}")
+# El middleware CORSMiddleware ya maneja las peticiones OPTIONS automáticamente de forma nativa.
 
 # Configuración de Claves y Base de Datos
 AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
