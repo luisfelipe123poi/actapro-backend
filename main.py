@@ -995,17 +995,21 @@ async def descargar_acta(acta_id: str, email: str):
     )
 
 import os
+import base64
 import pymupdf
 import pdfplumber
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from typing import Optional
 from openai import OpenAI
 
+# Importar la tarea Celery desde tasks.py
+from tasks import task_escanear_documento
+
 # Inicializa el cliente de OpenAI
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
-
+@app.post("/escanear")
 @app.post("/escanear-documento")
 async def escanear_documento(
     file: UploadFile = File(...), 
@@ -1015,7 +1019,7 @@ async def escanear_documento(
         # 1. Leer los bytes del archivo subido
         file_bytes = await file.read()
 
-        # 2. Convertir los bytes a string Base64 para poder pasarlos por la cola de Celery
+        # 2. Convertir los bytes a string Base64 para pasarlos por la cola de Celery
         file_bytes_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
         # 3. Disparar la tarea asíncrona en Celery pasando el Base64
