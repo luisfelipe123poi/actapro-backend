@@ -28,7 +28,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 from sib_api_v3_sdk.models import SendSmtpEmail, SendSmtpEmailSender, SendSmtpEmailTo
-from tu_modulo import task_procesar_asamblea  # Ajusta 'tu_modulo' según la estructura de tu proyecto
+from tasks import task_procesar_asamblea
 
 load_dotenv()
 
