@@ -917,6 +917,21 @@ async def procesar_asamblea(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error iniciando la tarea: {str(e)}")
 
+@app.post("/procesar")
+async def procesar_alias(
+    file: UploadFile = File(...),
+    email: str = Form(...),
+    instrucciones: Optional[str] = Form(None),
+    nombre_personalizado: Optional[str] = Form(None)
+):
+    # Llama a la misma función del endpoint procesar-asamblea
+    return await procesar_asamblea(
+        file=file,
+        email=email,
+        instrucciones=instrucciones,
+        nombre_personalizado=nombre_personalizado
+    )
+
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
     # 1. Buscar en MongoDB por ID o nombre asegurando el aislamiento del usuario
