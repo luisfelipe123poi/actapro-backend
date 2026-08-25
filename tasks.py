@@ -32,86 +32,95 @@ PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Hori
 
 @celery_app.task(bind=True)
 def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones: str, nombre_personalizado: str, original_filename: str):
-    self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores..."})
+    try:
+        self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores..."})
 
-    with open(temp_audio_path, "rb") as f:
-        content_bytes = f.read()
+        if not os.path.exists(temp_audio_path):
+            raise Exception(f"El archivo de audio temporal no existe en la ruta: {temp_audio_path}")
 
-    file_hash = hashlib.sha256(content_bytes).hexdigest()
-    cached = transripciones_collection.find_one({"file_hash": file_hash})
+        with open(temp_audio_path, "rb") as f:
+            content_bytes = f.read()
 
-    if cached:
-        texto_transcrito = cached["texto_transcrito"]
-    else:
-        config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
-        transcriber = aai.Transcriber()
-        transcript = transcriber.transcribe(temp_audio_path, config=config)
+        file_hash = hashlib.sha256(content_bytes).hexdigest()
+        cached = transripciones_collection.find_one({"file_hash": file_hash})
 
-        if transcript.status == aai.TranscriptStatus.error:
-            raise Exception(f"Error en AssemblyAI: {transcript.error}")
-
-        texto_transcrito = ""
-        if transcript.utterances:
-            for utterance in transcript.utterances:
-                texto_transcrito += f"[Persona {utterance.speaker}]: {utterance.text}\n"
+        if cached:
+            texto_transcrito = cached["texto_transcrito"]
         else:
-            texto_transcrito = transcript.text
+            config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
+            transcriber = aai.Transcriber()
+            transcript = transcriber.transcribe(temp_audio_path, config=config)
 
-        transripciones_collection.insert_one({
-            "file_hash": file_hash,
-            "filename": original_filename,
-            "texto_transcrito": texto_transcrito,
+            if transcript.status == aai.TranscriptStatus.error:
+                raise Exception(f"Error en AssemblyAI: {transcript.error}")
+
+            texto_transcrito = ""
+            if transcript.utterances:
+                for utterance in transcript.utterances:
+                    texto_transcrito += f"[Persona {utterance.speaker}]: {utterance.text}\n"
+            else:
+                texto_transcrito = transcript.text
+
+            transripciones_collection.insert_one({
+                "file_hash": file_hash,
+                "filename": original_filename,
+                "texto_transcrito": texto_transcrito,
+                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "createdAt": datetime.now(timezone.utc),
+            })
+
+        self.update_state(state="PROCESSING", meta={"status": "Generando el Acta con IA Jurídica..."})
+
+        session_id = str(uuid.uuid4())
+        nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx" if not nombre_personalizado else f"{nombre_personalizado.strip().replace(' ', '_')}.docx"
+
+        prompt_final = PROMPT_SISTEMA_ACTAS
+        if instrucciones:
+            prompt_final += f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt_final},
+                {"role": "user", "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}"},
+            ],
+            temperature=0.3,
+        )
+        acta_final = response.choices[0].message.content
+
+        os.makedirs("temp_outputs", exist_ok=True)
+        output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
+
+        doc = Document()
+        doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0).alignment = 1
+        for linea in acta_final.split("\n"):
+            if linea.strip():
+                doc.add_paragraph(linea.strip())
+        doc.save(output_docx_path)
+
+        peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
+        data_acta = {
+            "email": email,
+            "nombre_acta": nombre_archivo_acta,
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "createdAt": datetime.now(timezone.utc),
-        })
+            "peso": peso_archivo,
+            "contenido": acta_final,
+        }
+        inserted = actas_collection.insert_one(data_acta)
 
-    self.update_state(state="PROCESSING", meta={"status": "Generando el Acta con IA Jurídica..."})
+        return {
+            "status": "COMPLETED",
+            "acta_id": str(inserted.inserted_id),
+            "nombre_acta": nombre_archivo_acta
+        }
 
-    session_id = str(uuid.uuid4())
-    nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx" if not nombre_personalizado else f"{nombre_personalizado.strip().replace(' ', '_')}.docx"
+    except Exception as exc:
+        raise Exception(f"Fallo en la tarea de procesamiento: {str(exc)}")
 
-    prompt_final = PROMPT_SISTEMA_ACTAS
-    if instrucciones:
-        prompt_final += f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
-
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": prompt_final},
-            {"role": "user", "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}"},
-        ],
-        temperature=0.3,
-    )
-    acta_final = response.choices[0].message.content
-
-    os.makedirs("temp_outputs", exist_ok=True)
-    output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
-
-    doc = Document()
-    doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0).alignment = 1
-    for linea in acta_final.split("\n"):
-        if linea.strip():
-            doc.add_paragraph(linea.strip())
-    doc.save(output_docx_path)
-
-    peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
-    data_acta = {
-        "email": email,
-        "nombre_acta": nombre_archivo_acta,
-        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "peso": peso_archivo,
-        "contenido": acta_final,
-    }
-    inserted = actas_collection.insert_one(data_acta)
-
-    if os.path.exists(temp_audio_path):
-        os.remove(temp_audio_path)
-
-    return {
-        "status": "COMPLETED",
-        "acta_id": str(inserted.inserted_id),
-        "nombre_acta": nombre_archivo_acta
-    }
+    finally:
+        # Limpieza obligatoria del archivo temporal de audio para no saturar el disco
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
 
 
 @celery_app.task(bind=True)
