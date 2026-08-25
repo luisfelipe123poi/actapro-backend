@@ -337,7 +337,7 @@ def registrar_usuario(data: AuthModel):
         "limite_horas_mes": plan_config["horas"]
     }
 
-@app.post("/api/login")
+@app.post("/api/login/")
 def login_usuario(data: AuthModel):
     try:
         user = users_collection.find_one({"email": data.email})
