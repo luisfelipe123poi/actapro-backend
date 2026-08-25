@@ -60,9 +60,8 @@ app.add_middleware(
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
-# Capturador global para evitar que los errores 500 oculten los encabezados CORS
 @app.exception_handler(Exception)
-async function custom_general_exception_handler(request: Request, exc: Exception):
+async def custom_general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={"detail": f"Error interno del servidor: {str(exc)}"},
