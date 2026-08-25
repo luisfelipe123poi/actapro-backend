@@ -1,11 +1,10 @@
-import datetime
 import hashlib
 import io
 import os
 import re
 import shutil
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel
 from typing import Optional
@@ -1908,7 +1907,7 @@ async def get_crm_license_stats():
         print(f"Error en CRM stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-from datetime import datetime, timedelta
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
