@@ -231,24 +231,183 @@ def registrar_usuario(data: AuthModel):
 
     users_collection.insert_one(nuevo_usuario)
 
-    # Enviar correo de bienvenida según el plan con Brevo
-    nombre_usuario = data.email.split("@")[0]
+    # Enviar correo de bienvenida profesional según el plan con Brevo
+    nombre_usuario = data.email.split("@")[0].capitalize()
     asunto_correo = f"¡Bienvenido a ActaPro Core - Plan {data.plan.capitalize()} Activado!"
+    
+    # HTML Profesional con los colores corporativos de ActaPro Core y Banner Superior
     html_cuerpo = f"""
-    <div style="font-family: Arial, sans-serif; color: #333; padding: 20px; max-width: 600px; margin: auto; border: 1px solid #eaeaea; border-radius: 8px;">
-        <h2 style="color: #2563eb;">¡Hola {nombre_usuario}, bienvenido a ActaPro Core!</h2>
-        <p>Tu cuenta ha sido registrada exitosamente bajo el plan <strong>{data.plan.upper()}</strong>.</p>
-        <hr style="border: none; border-top: 1px solid #eaeaea; margin: 20px 0;">
-        <p><strong>Detalles de tu cuenta:</strong></p>
-        <ul>
-            <li>Límite de Tokens: {plan_config["tokens"]}</li>
-            <li>Límite de Horas: {plan_config["horas"]} hrs</li>
-        </ul>
-        <p>Ya puedes comenzar a aprovechar al máximo todas las herramientas de actas inteligentes.</p>
-        <br>
-        <p style="font-size: 12px; color: #666;">Atentamente,<br>El equipo de ActaPro Core</p>
-    </div>
+    <!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bienvenido a ActaPro Core</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+    <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; padding: 40px 0;">
+        <tr>
+            <td align="center">
+                <!-- Contenedor Principal (Ancho de 640px) -->
+                <table border="0" cellpadding="0" cellspacing="0" width="640" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.05), 0 8px 10px -6px rgba(15, 23, 42, 0.05);">
+                    
+                    <!-- ENCABEZADO CON IMAGOTIPO Y MARCA -->
+                    <tr>
+                        <td align="left" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 35px 40px 30px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <!-- Espacio para el Imagotipo / Logo -->
+                                    <td width="55" style="vertical-align: middle;">
+                                        <img src="https://actaprocore.com/assets/imagotipo.png" alt="Imagotipo ActaPro" width="45" height="45" style="display: block; border-radius: 8px; object-fit: contain;" />
+                                    </td>
+                                    <!-- Nombre de la Empresa y Slogan -->
+                                    <td style="vertical-align: middle; padding-left: 15px;">
+                                        <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.5px; line-height: 1.1;">ActaPro <span style="color: #38bdf8;">Core</span></h1>
+                                        <p style="color: #94a3b8; font-size: 11px; margin: 3px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;">Enterprise Legal Tech</p>
+                                    </td>
+                                    <!-- Badge de Estado -->
+                                    <td align="right" style="vertical-align: middle;">
+                                        <span style="background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; border: 1px solid rgba(56, 189, 248, 0.3);">Licencia Activa</span>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- HERO / SALUDO PERSONALIZADO -->
+                    <tr>
+                        <td style="padding: 40px 40px 20px 40px;">
+                            <h2 style="color: #0f172a; font-size: 22px; font-weight: 700; margin: 0 0 15px 0; letter-spacing: -0.3px;">Estimado/a [NombreUsuario],</h2>
+                            <p style="font-size: 16px; line-height: 1.7; color: #475569; margin: 0;">
+                                Le damos la más cordial bienvenida a <strong>ActaPro Core</strong>. Su cuenta institucional ha sido configurada exitosamente y se encuentra lista para optimizar la gestión documental y la transcripción de sus asambleas bajo rigurosos estándares jurídicos.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- BLOQUE DE CREDENCIALES Y PLAN (TARJETA EMPRESARIAL) -->
+                    <tr>
+                        <td style="padding: 0 40px 30px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px;">
+                                <tr>
+                                    <td style="padding: 24px;">
+                                        <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td colspan="2" style="padding-bottom: 15px; border-bottom: 1px solid #e2e8f0;">
+                                                    <span style="font-size: 12px; font-weight: bold; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Detalles de la Suscripción Corporativa</span>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 12px 0 8px 0; font-size: 15px; color: #334155; font-weight: 500;">Plan Asignado:</td>
+                                                <td align="right" style="padding: 12px 0 8px 0; font-size: 15px; color: #0f172a; font-weight: bold; text-transform: uppercase;">[Plan]</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; font-size: 15px; color: #334155; font-weight: 500;">Capacidad de Procesamiento:</td>
+                                                <td align="right" style="padding: 8px 0; font-size: 15px; color: #0f172a; font-weight: bold;">[Horas] hrs / mes</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0 12px 0; font-size: 15px; color: #334155; font-weight: 500;">Asignación de Tokens IA:</td>
+                                                <td align="right" style="padding: 8px 0 12px 0; font-size: 15px; color: #0f172a; font-weight: bold;">[Tokens]</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- GUÍA RÁPIDA DE PASOS (NIVEL CORPORATIVO) -->
+                    <tr>
+                        <td style="padding: 0 40px 30px 40px;">
+                            <p style="font-size: 14px; font-weight: bold; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 15px 0;">Primeros Pasos Operativos:</p>
+                            
+                            <!-- Paso 1 -->
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 12px;">
+                                <tr>
+                                    <td width="36" style="vertical-align: top;">
+                                        <div style="background-color: #2563eb; color: #ffffff; width: 26px; height: 26px; border-radius: 50%; text-align: center; font-size: 13px; font-weight: bold; line-height: 26px;">1</div>
+                                    </td>
+                                    <td style="vertical-align: middle;">
+                                        <p style="font-size: 14px; color: #334155; margin: 0; line-height: 1.5;"><strong>Acceda al Dashboard:</strong> Inicie sesión con sus credenciales corporativas autorizadas.</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Paso 2 -->
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 12px;">
+                                <tr>
+                                    <td width="36" style="vertical-align: top;">
+                                        <div style="background-color: #2563eb; color: #ffffff; width: 26px; height: 26px; border-radius: 50%; text-align: center; font-size: 13px; font-weight: bold; line-height: 26px;">2</div>
+                                    </td>
+                                    <td style="vertical-align: middle;">
+                                        <p style="font-size: 14px; color: #334155; margin: 0; line-height: 1.5;"><strong>Cargue el Archivo:</strong> Suba el registro de audio o video de su asamblea para análisis inteligente.</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Paso 3 -->
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td width="36" style="vertical-align: top;">
+                                        <div style="background-color: #2563eb; color: #ffffff; width: 26px; height: 26px; border-radius: 50%; text-align: center; font-size: 13px; font-weight: bold; line-height: 26px;">3</div>
+                                    </td>
+                                    <td style="vertical-align: middle;">
+                                        <p style="font-size: 14px; color: #334155; margin: 0; line-height: 1.5;"><strong>Obtenga el Acta:</strong> Descargue el documento ejecutivo formateado en Word/PDF listo para firma.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- BOTÓN DE ACCIÓN PRINCIPAL (CTA) -->
+                    <tr>
+                        <td align="center" style="padding: 10px 40px 40px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td align="center">
+                                        <a href="https://actaprocore.com/dashboard" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 14px 35px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); letter-spacing: 0.3px;">Acceder a la Plataforma</a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- SOPORTE Y ASISTENCIA -->
+                    <tr>
+                        <td style="padding: 0 40px 30px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-top: 1px solid #e2e8f0; padding-top: 25px;">
+                                <tr>
+                                    <td>
+                                        <p style="font-size: 13px; color: #64748b; margin: 0; line-height: 1.6;">
+                                            ¿Requiere asistencia técnica especializada o integración personalizada? Nuestro equipo de soporte corporativo está disponible a través de <a href="mailto:soporteactaprocore@gmail.com" style="color: #2563eb; text-decoration: none; font-weight: 600;">soporte@actaprocore.com</a>.
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- FOOTER CORPORATIVO -->
+                    <tr>
+                        <td align="center" style="background-color: #0f172a; padding: 30px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td align="center">
+                                        <p style="font-size: 12px; color: #94a3b8; margin: 0 0 8px 0; font-weight: 500;">Este mensaje ha sido emitido de manera automatizada por los sistemas de <strong>ActaPro Core</strong>.</p>
+                                        <p style="font-size: 11px; color: #64748b; margin: 0;">&copy; 2026 ActaPro Core. Todos los derechos reservados. | <a href="https://actaprocore.com/privacidad" target="_blank" style="color: #94a3b8; text-decoration: underline;">Política de Privacidad</a></p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
     """
+    
     enviar_correo_brevo(data.email, nombre_usuario, asunto_correo, html_cuerpo)
 
     return {
