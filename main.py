@@ -586,36 +586,50 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
             status_code=500, detail="Mercado Pago no está configurado en el servidor."
         )
 
-    # Validar que el email exista
+    # Validar y limpiar email
     email_cliente = data.email.strip().lower() if data.email else None
     if not email_cliente:
         raise HTTPException(
             status_code=400, detail="El correo electrónico es requerido para procesar el pago."
         )
 
-    plan_recibido = data.plan_name.lower().strip() if data.plan_name else ""
+    # Normalizar el plan recibido
+    plan_raw = (data.plan_name or "").lower().strip()
 
-    # Mapeo actualizado
-    mapeo = {
+    # Mapeo exhaustivo para soportar variaciones y alias del frontend
+    mapeo_planes = {
+        # Básico
         "basico": "basico",
         "básico": "basico",
         "plan basico": "basico",
         "plan básico": "basico",
+        
+        # Profesional / Intermedio
         "profesional": "profesional",
+        "intermedio": "profesional",
         "plan profesional": "profesional",
+        "plan intermedio": "profesional",
+        
+        # Corporativo / Pro
         "corporativo": "corporativo",
+        "pro": "corporativo",
         "plan corporativo": "corporativo",
+        "plan pro": "corporativo",
+        "plan profesional / pro": "corporativo"
     }
 
-    plan_id = mapeo.get(plan_recibido)
+    plan_id = mapeo_planes.get(plan_raw)
     if not plan_id or plan_id not in PRECIOS_PLANES:
         raise HTTPException(
             status_code=400, detail=f"Plan no válido: '{data.plan_name}'"
         )
 
+    # Extracción segura de datos del plan
     info_plan = PRECIOS_PLANES[plan_id]
+    nombre_mostrar = info_plan.get("nombre", "Plan ActaPro")
+    precio_plan = float(info_plan.get("precio", 0.0))
 
-    # Verificar o crear usuario base
+    # Verificar o crear usuario base en MongoDB
     user = users_collection.find_one({"email": email_cliente})
     if not user:
         users_collection.insert_one({
@@ -631,10 +645,10 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
 
     preference_data = {
         "items": [{
-            "title": f"ActaBot PH - {info_plan['nombre']}",
+            "title": f"ActaBot PH - {nombre_mostrar}",
             "quantity": 1,
             "currency_id": "COP",
-            "unit_price": float(info_plan["precio"]),
+            "unit_price": precio_plan,
         }],
         "payer": {"email": email_cliente},
         "back_urls": {
@@ -651,8 +665,8 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     try:
         preference_response = mp_sdk.preference().create(preference_data)
         
-        # Extracción segura de la respuesta según SDK
-        if "response" in preference_response:
+        # Extracción segura compatible con versiones del SDK
+        if isinstance(preference_response, dict) and "response" in preference_response:
             preference = preference_response["response"]
         else:
             preference = preference_response
@@ -671,6 +685,8 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
             "init_point": init_point,
             "sandbox_init_point": sandbox_init_point,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Exception en crear_preferencia_pago: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -688,18 +704,23 @@ async def webhook_mercadopago(request: Request):
             payment_id = body.get("data", {}).get("id")
             if payment_id and mp_sdk:
                 payment_info = mp_sdk.payment().get(payment_id)
-                payment = payment_info.get("response", payment_info)
+                
+                if isinstance(payment_info, dict) and "response" in payment_info:
+                    payment = payment_info["response"]
+                else:
+                    payment = payment_info
 
                 if payment.get("status") == "approved":
                     payer_email = payment.get("payer", {}).get("email") or payment.get("external_reference")
                     if payer_email:
+                        payer_email = payer_email.strip().lower()
                         items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
                         
                         plan_asignado = "basico"
 
                         for item in items:
                             title_lower = item.get("title", "").lower()
-                            if "corporativo" in title_lower:
+                            if "corporativo" in title_lower or "pro" in title_lower:
                                 plan_asignado = "corporativo"
                             elif "profesional" in title_lower or "intermedio" in title_lower:
                                 plan_asignado = "profesional"
@@ -711,6 +732,7 @@ async def webhook_mercadopago(request: Request):
                         tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
                         horas_otorgadas = info_plan.get("limite_horas", 15.0)
                         precio_pagado = info_plan.get("precio", 0.0)
+                        nombre_plan_fmt = info_plan.get("nombre", plan_asignado.capitalize())
 
                         users_collection.update_one(
                             {"email": payer_email},
@@ -727,9 +749,9 @@ async def webhook_mercadopago(request: Request):
                             upsert=True
                         )
 
-                        # Formateo correcto de variables en la plantilla HTML
+                        # Formateo correcto de variables dinámicas en el correo HTML
                         nombre_usuario = payer_email.split("@")[0].capitalize()
-                        asunto_correo = f"¡Compra exitosa! Licencia {info_plan['nombre']} Activada"
+                        asunto_correo = f"¡Compra exitosa! Licencia {nombre_plan_fmt} Activada"
                         
                         html_cuerpo = f"""<!DOCTYPE html>
 <html lang="es">
@@ -750,10 +772,10 @@ async def webhook_mercadopago(request: Request):
                     <tr>
                         <td style="padding: 30px;">
                             <h2 style="color: #0f172a;">Estimado/a {nombre_usuario},</h2>
-                            <p style="color: #475569;">Su pago ha sido procesado exitosamente y su licencia ya está disponible.</p>
+                            <p style="color: #475569;">Su pago ha sido procesado exitosamente y su licencia ya está activa.</p>
                             
                             <table width="100%" style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                                <tr><td><strong>Plan:</strong></td><td align="right">{info_plan['nombre']}</td></tr>
+                                <tr><td><strong>Plan:</strong></td><td align="right">{nombre_plan_fmt}</td></tr>
                                 <tr><td><strong>Inversión:</strong></td><td align="right">${precio_pagado:,.0f} COP</td></tr>
                                 <tr><td><strong>Horas de Audio:</strong></td><td align="right">{horas_otorgadas} hrs/mes</td></tr>
                                 <tr><td><strong>Tokens IA:</strong></td><td align="right">{tokens_otorgados:,}</td></tr>
