@@ -57,6 +57,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+
+# Capturador global para evitar que los errores 500 oculten los encabezados CORS
+@app.exception_handler(Exception)
+async function custom_general_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Error interno del servidor: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
+
 # Configuración de Claves y Base de Datos
 AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -338,20 +353,34 @@ def registrar_usuario(data: AuthModel):
 
 @app.post("/api/login")
 def login_usuario(data: AuthModel):
-    user = users_collection.find_one({"email": data.email})
-    if not user or user["password"] != data.password:
-        raise HTTPException(status_code=401, detail="Credenciales inválidas.")
+    try:
+        user = users_collection.find_one({"email": data.email})
+        
+        # Validación de usuario y contraseña
+        if not user or user.get("password") != data.password:
+            raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
-    return {
-        "message": "Login exitoso",
-        "email": user["email"],
-        "plan": user.get("plan", "free"),
-        "tokens_usados": user.get("tokens_usados", 0),
-        "limite_tokens_mes": user.get("limite_tokens_mes", 0),
-        "horas_restantes": user.get("horas_restantes", 0.0),
-        "limite_horas_mes": user.get("limite_horas_mes", 0.0)
-    }
+        # Retorno con casteo explícito de tipos para garantizar serialización JSON
+        return {
+            "message": "Login exitoso",
+            "email": str(user.get("email")),
+            "plan": str(user.get("plan", "free")),
+            "tokens_usados": int(user.get("tokens_usados", 0)),
+            "limite_tokens_mes": int(user.get("limite_tokens_mes", 0)),
+            "horas_restantes": float(user.get("horas_restantes", 0.0)),
+            "limite_horas_mes": float(user.get("limite_horas_mes", 0.0))
+        }
 
+    except HTTPException as http_ex:
+        # Re-lanzar excepciones HTTP explícitas (401, 400, etc.)
+        raise http_ex
+    except Exception as e:
+        # Captura cualquier falla de base de datos o lógica interna para dar feedback claro
+        print(f"Error interno en /api/login: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Error interno en el servidor al procesar el inicio de sesión."
+        )
 
 @app.get("/api/user/status")
 def get_user_status(email: str):
