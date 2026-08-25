@@ -1075,6 +1075,47 @@ class EliminarScannerRequest(BaseModel):
 
 # ================= ENDPOINTS DE SCANNERS =================
 
+import os
+from fastapi import FastAPI, HTTPException
+from celery.result import AsyncResult
+from celery_app import celery_app
+
+app = FastAPI()
+
+# Asegurar que exista el directorio para audios temporales
+os.makedirs("temp_uploads", exist_ok=True)
+os.makedirs("temp_outputs", exist_ok=True)
+
+# ---------------------------------------------------------
+# ENDPOINT: CONSULTAR ESTADO DE LA TAREA (POLLING)
+# ---------------------------------------------------------
+@app.get("/estado-tarea/{task_id}")
+async def obtener_estado_tarea(task_id: str):
+    res = AsyncResult(task_id, app=celery_app)
+    
+    if res.state == "PENDING":
+        return {
+            "status": "PROCESSING",
+            "info": {"status": "En cola de espera..."}
+        }
+    elif res.state == "PROCESSING":
+        return {
+            "status": "PROCESSING",
+            "info": res.info  # Devuelve la meta enviada desde update_state
+        }
+    elif res.state == "SUCCESS":
+        return {
+            "status": "COMPLETED",
+            "result": res.result  # Devuelve el diccionario final retornado por la tarea
+        }
+    elif res.state == "FAILURE":
+        return {
+            "status": "FAILED",
+            "error": str(res.result)
+        }
+    
+    return {"status": res.state, "info": str(res.info)}
+
 @app.get("/api/scanners/historial")
 async def obtener_historial_scanners(email: str):
     scanners_cursor = scanners_historial_collection.find({"email": email})
