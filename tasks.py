@@ -1,0 +1,258 @@
+import os
+import io
+import uuid
+import base64
+import hashlib
+from datetime import datetime, timezone
+from celery_app import celery_app
+import assemblyai as aai
+import openai
+import pymupdf as fitz
+import pdfplumber
+from docx import Document
+from pymongo import MongoClient
+
+# Inicialización de clientes desde variables de entorno
+AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+
+aai.settings.api_key = AAI_API_KEY
+openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client["actabot_db"]
+
+users_collection = db["users"]
+actas_collection = db["actas_historial"]
+transripciones_collection = db["transripciones_cache"]
+scanners_historial_collection = db["scanners_historial"]
+
+PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Tu objetivo es redactar un acta formal, jurídica y detallada a partir de la transcripción de la asamblea provista, asegurando un formato profesional en Markdown y cumplimiento legal estricto."""
+
+
+@celery_app.task(bind=True)
+def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones: str, nombre_personalizado: str, original_filename: str):
+    self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores..."})
+
+    with open(temp_audio_path, "rb") as f:
+        content_bytes = f.read()
+
+    file_hash = hashlib.sha256(content_bytes).hexdigest()
+    cached = transripciones_collection.find_one({"file_hash": file_hash})
+
+    if cached:
+        texto_transcrito = cached["texto_transcrito"]
+    else:
+        config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
+        transcriber = aai.Transcriber()
+        transcript = transcriber.transcribe(temp_audio_path, config=config)
+
+        if transcript.status == aai.TranscriptStatus.error:
+            raise Exception(f"Error en AssemblyAI: {transcript.error}")
+
+        texto_transcrito = ""
+        if transcript.utterances:
+            for utterance in transcript.utterances:
+                texto_transcrito += f"[Persona {utterance.speaker}]: {utterance.text}\n"
+        else:
+            texto_transcrito = transcript.text
+
+        transripciones_collection.insert_one({
+            "file_hash": file_hash,
+            "filename": original_filename,
+            "texto_transcrito": texto_transcrito,
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "createdAt": datetime.now(timezone.utc),
+        })
+
+    self.update_state(state="PROCESSING", meta={"status": "Generando el Acta con IA Jurídica..."})
+
+    session_id = str(uuid.uuid4())
+    nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx" if not nombre_personalizado else f"{nombre_personalizado.strip().replace(' ', '_')}.docx"
+
+    prompt_final = PROMPT_SISTEMA_ACTAS
+    if instrucciones:
+        prompt_final += f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
+
+    response = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": prompt_final},
+            {"role": "user", "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}"},
+        ],
+        temperature=0.3,
+    )
+    acta_final = response.choices[0].message.content
+
+    os.makedirs("temp_outputs", exist_ok=True)
+    output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
+
+    doc = Document()
+    doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0).alignment = 1
+    for linea in acta_final.split("\n"):
+        if linea.strip():
+            doc.add_paragraph(linea.strip())
+    doc.save(output_docx_path)
+
+    peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
+    data_acta = {
+        "email": email,
+        "nombre_acta": nombre_archivo_acta,
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "peso": peso_archivo,
+        "contenido": acta_final,
+    }
+    inserted = actas_collection.insert_one(data_acta)
+
+    if os.path.exists(temp_audio_path):
+        os.remove(temp_audio_path)
+
+    return {
+        "status": "COMPLETED",
+        "acta_id": str(inserted.inserted_id),
+        "nombre_acta": nombre_archivo_acta
+    }
+
+
+@celery_app.task(bind=True)
+def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str = None):
+    try:
+        self.update_state(state="PROCESSING", meta={"status": "Validando permisos y leyendo archivo..."})
+
+        # 0. VALIDAR USUARIO Y CUOTA DE TOKENS SI SE PROPORCIONA EMAIL
+        if email:
+            usuario = users_collection.find_one({"email": email})
+            if usuario:
+                tokens_usados = usuario.get("tokens_usados", 0)
+                limite_tokens = usuario.get("limite_tokens_mes", 0)
+                if limite_tokens > 0 and tokens_usados >= limite_tokens:
+                    raise Exception("Has alcanzado el límite de tokens mensuales de tu plan. Actualiza tu suscripción para continuar.")
+
+        # 1. Decodificar los bytes transmitidos vía base64 desde FastAPI
+        file_bytes = base64.b64decode(file_bytes_b64)
+        filename_lower = filename.lower()
+        
+        texto_extraido = ""
+        es_imagen = filename_lower.endswith((".png", ".jpg", ".jpeg", ".webp"))
+        
+        # 2. Extracción según el formato del archivo
+        if es_imagen:
+            base64_image = base64.b64encode(file_bytes).decode("utf-8")
+            contenido_usuario = [
+                {
+                    "type": "text",
+                    "text": "Analyze this scanned document or image. Extract the information by structuring the visual design with corporate semantic HTML tags (use <h1>, <h2>, <p>, <table>, <thead>, <tbody>, <tr>, <th>, <td>). Apply Tailwind CSS classes to maintain a professional style (e.g., fonts, clean borders, spacing). DO NOT use Markdown, DO NOT use asterisks, DO NOT use code blocks of any kind. If there are data tables, create them completely with HTML tags. If you detect statistical charts or diagrams, represent them with a structured div with the class 'p-4 border-2 border-dashed border-slate-300 bg-slate-50 text-center text-slate-500 rounded-lg text-xs my-4' indicating the content of the chart."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
+                }
+            ]
+        else:
+            if filename_lower.endswith(".pdf"):
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    texto_pagina = page.get_text()
+                    
+                    if texto_pagina.strip():
+                        texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
+                
+                doc.close()
+                
+                # Respaldo con pdfplumber para extracción precisa de tablas en PDFs
+                if len(texto_extraido.strip()) < 50:
+                    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                        for i, page in enumerate(pdf.pages):
+                            t = page.extract_text()
+                            if t:
+                                texto_extraido += f"\n--- Página (Tablas) {i + 1} ---\n" + t
+
+            elif filename_lower.endswith((".txt", ".doc", ".docx")):
+                texto_extraido = file_bytes.decode("utf-8", errors="ignore")
+            else:
+                raise Exception("Formato de archivo no soportado. Sube un PDF, imagen o documento de texto.")
+
+            if not texto_extraido.strip():
+                raise Exception("El documento está vacío o no se pudo extraer texto legible.")
+
+            contenido_usuario = f"""Analyze the following text extracted from the document. Your output must be EXCLUSIVELY corporate semantic HTML ready to render directly in a browser or web container.
+- Replicate the original visual and section structure.
+- Use <h1>, <h2> for main and section titles.
+- Use <p> for paragraphs with Tailwind classes (e.g., text-slate-900, text-xs, leading-relaxed).
+- Use complete table tags (<table>, <thead>, <tbody>, <tr>, <th>, <td>) with borders and corporate classes if there is structured data.
+- If you detect references to charts, schemes, or diagrams, create them as a visual block with a dotted border.
+- FORBIDDEN to use Markdown, asterisks (*), markdown list hyphens (#), or wrap the result in markdown code quotes.
+
+Extracted text:
+{texto_extraido[:15000]}"""
+
+        self.update_state(state="PROCESSING", meta={"status": "Procesando HTML estructurado con GPT-4o..."})
+
+        # 3. Procesamiento inteligente y estructurado con OpenAI GPT-4o
+        response_openai = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are a Documentation Engineer and Web Designer expert in corporate digitalization. 
+Your sole mission is to transform the input document information into a pure, clean, and professional HTML code block integrated with Tailwind CSS classes.
+STRICT RULES:
+1. Return ONLY valid HTML code. Do not include prior explanations or text outside of the HTML.
+2. NEVER use Markdown syntax (*, #, -, ```html). The result must be plain text containing exclusively HTML markup.
+3. Structure data tables with <table>, <thead>, <tbody>, <tr>, <th>, and <td> applying clean classes (e.g., border border-slate-300 p-2).
+4. Represent detected charts using a <div> container with dotted borders and professional design.
+5. Maintain absolute fidelity to the original document structure."""
+                },
+                {
+                    "role": "user",
+                    "content": contenido_usuario
+                }
+            ],
+            temperature=0.0
+        )
+
+        resultado_html = response_openai.choices[0].message.content.strip()
+
+        # Descontar / sumar tokens consumidos en la BD si el usuario está autenticado
+        tokens_consumidos = 0
+        if email and hasattr(response_openai, "usage") and response_openai.usage:
+            tokens_consumidos = response_openai.usage.total_tokens
+            users_collection.update_one(
+                {"email": email},
+                {"$inc": {"tokens_usados": tokens_consumidos}}
+            )
+
+        # Limpieza defensiva por si el modelo por inercia agrega bloques de código
+        if resultado_html.startswith("```html"):
+            resultado_html = resultado_html[7:]
+        if resultado_html.startswith("```"):
+            resultado_html = resultado_html[3:]
+        if resultado_html.endswith("```"):
+            resultado_html = resultado_html[:-3]
+        resultado_html = resultado_html.strip()
+
+        # Guardar automáticamente en la colección de scanners si hay email
+        scanner_id = None
+        if email:
+            nuevo_registro = {
+                "email": email,
+                "nombre": filename or "Documento Escaneado",
+                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "tokens": tokens_consumidos,
+                "contenido": resultado_html
+            }
+            resultado_db = scanners_historial_collection.insert_one(nuevo_registro)
+            scanner_id = str(resultado_db.inserted_id)
+
+        # 4. Retornar el HTML estructurado
+        return {
+            "status": "COMPLETED",
+            "transcripcion": resultado_html,
+            "id": scanner_id
+        }
+
+    except Exception as e:
+        raise Exception(f"Error procesando el archivo en Celery: {str(e)}")
