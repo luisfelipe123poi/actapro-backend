@@ -1778,7 +1778,7 @@ async def recibir_contacto_enterprise(datos: ContactoEnterprise):
         nuevo_lead = datos.model_dump()
         
         # Corrección de la llamada a datetime (usando la clase correcta del módulo)
-        nuevo_lead["fecha"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        nuevo_lead["fecha"] = datetime.now(timezone.utc).isoformat()
         nuevo_lead["estado"] = "Pendiente"
         
         # Guardado síncrono en MongoDB
