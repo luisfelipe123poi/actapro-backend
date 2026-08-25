@@ -1774,12 +1774,14 @@ class ContactoEnterprise(BaseModel):
 @app.post("/api/contacto-enterprise")
 async def recibir_contacto_enterprise(datos: ContactoEnterprise):
     try:
-        # Preparamos el documento con fecha actual y estado por defecto
+        # Preparamos el documento con fecha UTC actual y estado por defecto
         nuevo_lead = datos.model_dump()
-        nuevo_lead["fecha"] = datetime.datetime.utcnow().isoformat()
+        
+        # Corrección de la llamada a datetime (usando la clase correcta del módulo)
+        nuevo_lead["fecha"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         nuevo_lead["estado"] = "Pendiente"
         
-        # CORRECCIÓN: Quitamos el 'await' porque pymongo es síncrono
+        # Guardado síncrono en MongoDB
         resultado_db = db.cotizaciones.insert_one(nuevo_lead)
         
         print(f"Nueva solicitud Enterprise guardada con ID: {resultado_db.inserted_id}")
