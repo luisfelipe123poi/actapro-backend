@@ -844,264 +844,37 @@ def validar_calidad_audio(file_path: str):
         }
 
 
-@app.post("/procesar")
+@app.post("/procesar-asamblea")
 async def procesar_asamblea(
     file: UploadFile = File(...),
-    instrucciones: Optional[str] = Form(""),
     email: str = Form(...),
-    nombre_personalizado: Optional[str] = Form(None),
+    instrucciones: Optional[str] = Form(None),
+    nombre_personalizado: Optional[str] = Form(None)
 ):
-    user = users_collection.find_one({"email": email})
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no autenticado.")
-
-    plan_usuario = user.get("plan", "free")
-
-    os.makedirs("temp_uploads", exist_ok=True)
-    os.makedirs("temp_outputs", exist_ok=True)
-
-    session_id = str(uuid.uuid4())
-    temp_audio_path = f"temp_uploads/{session_id}_{file.filename}"
-
     try:
-        content_bytes = await file.read()
-        
-        # Guardar archivo temporalmente para validar calidad y duración
+        # Guardar el archivo de audio temporalmente en disco para que el worker de Celery pueda leerlo
+        temp_audio_path = f"temp_uploads/{file.filename}"
         with open(temp_audio_path, "wb") as buffer:
-            buffer.write(content_bytes)
+            buffer.write(await file.read())
 
-        # 1. Validar calidad técnica y obtener duración exacta usando ffmpeg.probe
-        try:
-            metadata = await __import__("asyncio").to_thread(ffmpeg.probe, temp_audio_path)
-            format_data = metadata.get("format", {})
-            bit_rate = format_data.get("bit_rate")
-            duration_seconds = format_data.get("duration")
+        # Disparar la tarea asíncrona en Celery mediante .delay()
+        task = task_procesar_asamblea.delay(
+            temp_audio_path=temp_audio_path,
+            email=email,
+            instrucciones=instrucciones,
+            nombre_personalizado=nombre_personalizado,
+            original_filename=file.filename
+        )
 
-            if not duration_seconds:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No se pudo leer la duración del archivo de audio."
-                )
-
-            duracion_segundos = float(duration_seconds)
-            duracion_minutos = duracion_segundos / 60.0
-
-            # REGLA CALIDAD 1: Bitrate menor a 32 kbps
-            if bit_rate and float(bit_rate) < 32000:
-                raise HTTPException(
-                    status_code=400,
-                    detail="El archivo presenta una calidad técnica deficiente (bitrate muy bajo). Esto impedirá una correcta identificación de oradores."
-                )
-
-            # REGLA CALIDAD 2: Audio demasiado corto (menos de 10 segundos)
-            if duracion_segundos < 10:
-                raise HTTPException(
-                    status_code=400,
-                    detail="El archivo de audio es demasiado corto para ser una asamblea."
-                )
-
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No se pudo leer el archivo de audio. Puede estar corrupto o el formato no es compatible. Detalle: {str(e)}"
-            )
-
-        # 2. Validar límite de duración por archivo individual según el plan
-        limites_por_archivo = {
-            "free": 30,          # Máximo 30 min por archivo
-            "basico": 180,       # Máximo 3 horas por archivo
-            "profesional": 300,  # Máximo 5 horas por archivo
-            "corporativo": 600   # Máximo 10 horas por archivo
+        # Responder de inmediato al frontend con el ID de la tarea
+        return {
+            "status": "pending",
+            "task_id": task.id,
+            "message": "Procesamiento de asamblea iniciado correctamente."
         }
-        limite_archivo_min = limites_por_archivo.get(plan_usuario, 30)
-        
-        if duracion_minutos > limite_archivo_min:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Este audio dura {round(duracion_minutos, 1)} minutos. Tu plan actual permite un límite máximo de {limite_archivo_min} minutos por archivo individual."
-            )
-
-        # 3. Validar límite de horas acumuladas en el mes
-        horas_usadas_mes = user.get("horas_usadas_mes", 0.0)
-        limites_mensuales = {
-            "free": 3.0,
-            "basico": 15.0,
-            "profesional": 60.0,
-            "corporativo": 200.0
-        }
-        limite_mes = limites_mensuales.get(plan_usuario, 1.0)
-
-        if horas_usadas_mes >= limite_mes:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Has alcanzado el límite de {limite_mes} horas mensuales de tu plan. Actualiza tu suscripción para seguir procesando actas."
-            )
-
-        # Caché de transcripción para evitar gastos duplicados en AssemblyAI
-        file_hash = hashlib.sha256(content_bytes).hexdigest()
-        cached_transcription = transripciones_collection.find_one(
-            {"file_hash": file_hash}
-        )
-
-        if cached_transcription:
-            print(
-                "💡 Audio duplicado detectado: Reutilizando transcripción guardada"
-                " para evitar gasto en AssemblyAI."
-            )
-            texto_transcrito = cached_transcription["texto_transcrito"]
-        else:
-            config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
-            transcriber = aai.Transcriber()
-            transcript = transcriber.transcribe(temp_audio_path, config=config)
-
-            if transcript.status == aai.TranscriptStatus.error:
-                raise HTTPException(
-                    status_code=500, detail=f"Error en AssemblyAI: {transcript.error}"
-                )
-
-            texto_transcrito = ""
-            if transcript.utterances:
-                for utterance in transcript.utterances:
-                    texto_transcrito += (
-                        f"[Persona {utterance.speaker}]: {utterance.text}\n"
-                    )
-            else:
-                texto_transcrito = transcript.text
-
-            transripciones_collection.insert_one({
-                "file_hash": file_hash,
-                "filename": file.filename,
-                "texto_transcrito": texto_transcrito,
-                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "createdAt": datetime.utcnow(),
-            })
-
-        # Lógica de nombre del acta
-        if not nombre_personalizado or nombre_personalizado.strip() == "":
-            try:
-                prompt_nombre = f"""
-                Analiza el siguiente fragmento de transcripción de una asamblea y extrae estrictamente el nombre del edificio, conjunto residencial, copropiedad o empresa mencionada. 
-                Responde ÚNICAMENTE con un nombre limpio apto para archivo (sin espacios, usa guiones bajos _, sin tildes ni caracteres especiales, por ejemplo: Acta_Asamblea_Edificio_Torre_Central).
-                
-                Transcripción:
-                {texto_transcrito[:2500]}...
-                """
-                resp_nombre = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt_nombre}],
-                    temperature=0.2,
-                )
-                nombre_ia = (
-                    resp_nombre.choices[0]
-                    .message.content.strip()
-                    .replace(" ", "_")
-                )
-                nombre_ia = "".join(
-                    c for c in nombre_ia if c.isalnum() or c in ("_", "-")
-                )
-                nombre_archivo_acta = (
-                    f"{nombre_ia}.docx"
-                    if nombre_ia
-                    else f"Acta_Asamblea_{session_id[:8]}.docx"
-                )
-            except Exception:
-                nombre_archivo_acta = f"Acta_Asamblea_{session_id[:8]}.docx"
-        else:
-            nombre_limpio = nombre_personalizado.strip().replace(" ", "_")
-            nombre_limpio = "".join(
-                c for c in nombre_limpio if c.isalnum() or c in ("_", "-", ".")
-            )
-            nombre_base = nombre_limpio.replace(".docx", "")
-            nombre_archivo_acta = f"{nombre_base}.docx"
-
-        output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
-
-        prompt_sistema = PROMPT_SISTEMA_ACTAS
-        if instrucciones:
-            prompt_sistema += (
-                f"\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n{instrucciones}"
-            )
-
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": prompt_sistema},
-                {
-                    "role": "user",
-                    "content": f"Transcripción de la asamblea:\n\n{texto_transcrito}",
-                },
-            ],
-            temperature=0.3,
-        )
-
-        acta_final = response.choices[0].message.content
-
-        doc = Document()
-        titulo_principal = doc.add_heading(
-            "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0
-        )
-        titulo_principal.alignment = 1
-
-        for linea in acta_final.split("\n"):
-            linea_clean = linea.strip()
-            if not linea_clean:
-                continue
-
-            if linea_clean.startswith("# "):
-                doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
-            elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
-                doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
-            else:
-                p = doc.add_paragraph()
-                if "**" in linea_clean:
-                    partes = linea_clean.split("**")
-                    for i, parte in enumerate(partes):
-                        if parte:
-                            run = p.add_run(parte)
-                            if i % 2 == 1:
-                                run.bold = True
-                else:
-                    p.add_run(linea_clean)
-
-        doc.save(output_docx_path)
-
-        peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
-
-        data_acta = {
-            "email": email,
-            "nombre_acta": nombre_archivo_acta,
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "peso": peso_archivo,
-            "contenido": acta_final,
-        }
-        actas_collection.insert_one(data_acta)
-
-        # 4. Actualizar consumo mensual de horas sumando la duración real del audio procesado
-        nuevas_horas = horas_usadas_mes + (duracion_segundos / 3600.0)
-        users_collection.update_one(
-            {"email": email}, 
-            {"$set": {"horas_usadas_mes": nuevas_horas}}
-        )
-
-        return FileResponse(
-            path=output_docx_path,
-            filename=nombre_archivo_acta,
-            media_type=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.Document"
-            ),
-        )
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+        raise HTTPException(status_code=500, detail=f"Error iniciando la tarea: {str(e)}")
 
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
@@ -1170,153 +943,34 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
 
-@app.post("/escanear")
+@app.post("/escanear-documento")
 async def escanear_documento(
     file: UploadFile = File(...), 
     email: Optional[str] = Form(None)
 ):
     try:
-        # 0. VALIDAR USUARIO Y CUOTA DE TOKENS SI SE PROPORCIONA EMAIL
-        if email:
-            usuario = users_collection.find_one({"email": email})
-            if usuario:
-                tokens_usados = usuario.get("tokens_usados", 0)
-                limite_tokens = usuario.get("limite_tokens_mes", 0)
-                # Si el usuario tiene un límite asignado mayor a 0 y ya lo alcanzó
-                if limite_tokens > 0 and tokens_usados >= limite_tokens:
-                    raise HTTPException(
-                        status_code=403, 
-                        detail="Has alcanzado el límite de tokens mensuales de tu plan. Actualiza tu suscripción para continuar."
-                    )
-
-        # 1. Leer los bytes del archivo subido desde el frontend
+        # 1. Leer los bytes del archivo subido
         file_bytes = await file.read()
-        filename = file.filename.lower()
-        
-        texto_extraido = ""
-        es_imagen = filename.endswith((".png", ".jpg", ".jpeg", ".webp"))
-        
-        # 2. Extracción según el formato del archivo
-        if es_imagen:
-            base64_image = base64.b64encode(file_bytes).decode("utf-8")
-            contenido_usuario = [
-                {
-                    "type": "text",
-                    "text": "Analyze this scanned document or image. Extract the information by structuring the visual design with corporate semantic HTML tags (use <h1>, <h2>, <p>, <table>, <thead>, <tbody>, <tr>, <th>, <td>). Apply Tailwind CSS classes to maintain a professional style (e.g., fonts, clean borders, spacing). DO NOT use Markdown, DO NOT use asterisks, DO NOT use code blocks of any kind. If there are data tables, create them completely with HTML tags. If you detect statistical charts or diagrams, represent them with a structured div with the class 'p-4 border-2 border-dashed border-slate-300 bg-slate-50 text-center text-slate-500 rounded-lg text-xs my-4' indicating the content of the chart."
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}"
-                    }
-                }
-            ]
-        else:
-            if filename.endswith(".pdf"):
-                doc = fitz.open(stream=file_bytes, filetype="pdf")
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    texto_pagina = page.get_text()
-                    
-                    if texto_pagina.strip():
-                        texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
-                
-                doc.close()
-                
-                # Respaldo con pdfplumber para extracción precisa de tablas en PDFs
-                if len(texto_extraido.strip()) < 50:
-                    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                        for i, page in enumerate(pdf.pages):
-                            t = page.extract_text()
-                            if t:
-                                texto_extraido += f"\n--- Página (Tablas) {i + 1} ---\n" + t
 
-            elif filename.endswith((".txt", ".doc", ".docx")):
-                texto_extraido = file_bytes.decode("utf-8", errors="ignore")
-            else:
-                raise HTTPException(status_code=400, detail="Formato de archivo no soportado. Sube un PDF, imagen o documento de texto.")
+        # 2. Convertir los bytes a string Base64 para poder pasarlos por la cola de Celery
+        file_bytes_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
-            if not texto_extraido.strip():
-                raise HTTPException(status_code=400, detail="El documento está vacío o no se pudo extraer texto legible.")
-
-            contenido_usuario = f"""Analyze the following text extracted from the document. Your output must be EXCLUSIVELY corporate semantic HTML ready to render directly in a browser or web container.
-- Replicate the original visual and section structure.
-- Use <h1>, <h2> for main and section titles.
-- Use <p> for paragraphs with Tailwind classes (e.g., text-slate-900, text-xs, leading-relaxed).
-- Use complete table tags (<table>, <thead>, <tbody>, <tr>, <td>) with borders and corporate classes if there is structured data.
-- If you detect references to charts, schemes, or diagrams, create them as a visual block with a dotted border.
-- FORBIDDEN to use Markdown, asterisks (*), markdown list hyphens (#), or wrap the result in markdown code quotes.
-
-Extracted text:
-{texto_extraido[:15000]}"""
-
-        # 3. Procesamiento inteligente y estructurado con OpenAI GPT-4o
-        response_openai = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """You are a Documentation Engineer and Web Designer expert in corporate digitalization. 
-Your sole mission is to transform the input document information into a pure, clean, and professional HTML code block integrated with Tailwind CSS classes.
-STRICT RULES:
-1. Return ONLY valid HTML code. Do not include prior explanations or text outside of the HTML.
-2. NEVER use Markdown syntax (*, #, -, ```html). The result must be plain text containing exclusively HTML markup.
-3. Structure data tables with <table>, <thead>, <tbody>, <tr>, <th>, and <td> applying clean classes (e.g., border border-slate-300 p-2).
-4. Represent detected charts using a <div> container with dotted borders and professional design.
-5. Maintain absolute fidelity to the original document structure."""
-                },
-                {
-                    "role": "user",
-                    "content": contenido_usuario
-                }
-            ],
-            temperature=0.0
+        # 3. Disparar la tarea asíncrona en Celery pasando el Base64
+        task = task_escanear_documento.delay(
+            file_bytes_b64=file_bytes_b64,
+            filename=file.filename,
+            email=email
         )
 
-        resultado_html = response_openai.choices[0].message.content.strip()
-
-        # Descontar / sumar tokens consumidos en la BD si el usuario está autenticado
-        tokens_consumidos = 0
-        if email and hasattr(response_openai, "usage") and response_openai.usage:
-            tokens_consumidos = response_openai.usage.total_tokens
-            users_collection.update_one(
-                {"email": email},
-                {"$inc": {"tokens_usados": tokens_consumidos}}
-            )
-
-        # Limpieza defensiva por si el modelo por inercia agrega bloques de código
-        if resultado_html.startswith("```html"):
-            resultado_html = resultado_html[7:]
-        if resultado_html.startswith("```"):
-            resultado_html = resultado_html[3:]
-        if resultado_html.endswith("```"):
-            resultado_html = resultado_html[:-3]
-        resultado_html = resultado_html.strip()
-
-        # Guardar automáticamente en la colección de scanners si hay email
-        scanner_id = None
-        if email:
-            nuevo_registro = {
-                "email": email,
-                "nombre": file.filename or "Documento Escaneado",
-                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "tokens": tokens_consumidos,
-                "contenido": resultado_html
-            }
-            resultado_db = scanners_historial_collection.insert_one(nuevo_registro)
-            scanner_id = str(resultado_db.inserted_id)
-
-        # 4. Retornar el HTML estructurado al Frontend
+        # 4. Retornar inmediatamente el ID de la tarea al frontend
         return {
-            "status": "success",
-            "transcripcion": resultado_html,
-            "id": scanner_id
+            "status": "pending",
+            "task_id": task.id,
+            "message": "Escaneo de documento en proceso."
         }
 
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando el archivo: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error iniciando el escaneo: {str(e)}")
         
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
