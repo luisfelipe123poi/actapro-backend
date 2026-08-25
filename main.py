@@ -35,7 +35,11 @@ load_dotenv()
 # ==========================================
 # 0. Inicialización y Configuración General
 # ==========================================
-app = FastAPI(title="ActaProCore API con MongoDB y Mercado Pago", version="1.9.5")
+app = FastAPI(
+    title="ActaProCore API con MongoDB y Mercado Pago", 
+    version="1.9.5",
+    redirect_slashes=False
+)
 
 # Configuración de CORS
 origins = [
@@ -337,7 +341,7 @@ def registrar_usuario(data: AuthModel):
         "limite_horas_mes": plan_config["horas"]
     }
 
-@app.post("/api/login/")
+@app.post("/api/login")
 def login_usuario(data: AuthModel):
     try:
         user = users_collection.find_one({"email": data.email})
