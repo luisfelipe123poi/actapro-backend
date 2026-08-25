@@ -364,7 +364,7 @@ def registrar_usuario(data: AuthModel):
                             <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                 <tr>
                                     <td align="center">
-                                        <a href="https://actaprocore.com/dashboard" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 14px 35px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); letter-spacing: 0.3px;">Acceder a la Plataforma</a>
+                                        <a href="https://actaprocore.com" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 14px 35px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); letter-spacing: 0.3px;">Acceder a la Plataforma</a>
                                     </td>
                                 </tr>
                             </table>
@@ -801,26 +801,198 @@ async def webhook_mercadopago(request: Request):
                             upsert=True
                         )
 
-                        # Enviar Correo de Confirmación de Compra con Brevo
-                        nombre_usuario = payer_email.split("@")[0]
-                        asunto_correo = f"¡Compra exitosa! Plan {info_plan['nombre']} Activado"
+                        # Enviar Correo de Confirmación de Compra Ultra Profesional con Brevo
+                        nombre_usuario = payer_email.split("@")[0].capitalize()
+                        asunto_correo = f"¡Compra exitosa! Licencia Corporativa {info_plan['nombre']} Activada"
+                        
                         html_cuerpo = f"""
-                        <div style="font-family: Arial, sans-serif; color: #333; padding: 20px; max-width: 600px; margin: auto; border: 1px solid #eaeaea; border-radius: 8px;">
-                            <h2 style="color: #16a34a;">¡Gracias por tu compra, {nombre_usuario}!</h2>
-                            <p>Tu suscripción al plan <strong>{info_plan['nombre']}</strong> se ha procesado y activado correctamente.</p>
-                            <hr style="border: none; border-top: 1px solid #eaeaea; margin: 20px 0;">
-                            <p><strong>Detalles de la transacción:</strong></p>
-                            <ul>
-                                <li><strong>Plan:</strong> {info_plan['nombre']}</li>
-                                <li><strong>Monto pagado:</strong> ${precio_pagado} COP</li>
-                                <li><strong>Límite de Tokens:</strong> {tokens_otorgados}</li>
-                                <li><strong>Límite de Horas:</strong> {horas_otorgadas} hrs</li>
-                            </ul>
-                            <p>Ya puedes disfrutar de todas las funcionalidades ilimitadas de tu plataforma de actas inteligentes.</p>
-                            <br>
-                            <p style="font-size: 12px; color: #666;">Atentamente,<br>El equipo de ActaPro Core</p>
-                        </div>
+                        <!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirmación Oficial de Activación - ActaPro Core</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+    <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f1f5f9; padding: 40px 0;">
+        <tr>
+            <td align="center">
+                <!-- Contenedor Principal (640px de ancho corporativo) -->
+                <table border="0" cellpadding="0" cellspacing="0" width="640" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 10px 10px -5px rgba(15, 23, 42, 0.04);">
+                    
+                    <!-- 1. ENCABEZADO INSTITUCIONAL CON IMAGOTIPO -->
+                    <tr>
+                        <td align="left" style="background: linear-gradient(135deg, #090d16 0%, #0f172a 50%, #1e293b 100%); padding: 40px 40px 30px 40px; border-bottom: 3px solid #10b981;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <!-- Imagotipo / Logo -->
+                                    <td width="60" style="vertical-align: middle;">
+                                        <img src="https://actaprocore.com/assets/imagotipo.png" alt="Imagotipo ActaPro" width="50" height="50" style="display: block; border-radius: 10px; object-fit: contain; background: rgba(255,255,255,0.05); padding: 2px;" />
+                                    </td>
+                                    <!-- Nombre y Slogan -->
+                                    <td style="vertical-align: middle; padding-left: 15px;">
+                                        <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.5px; line-height: 1.1;">ActaPro <span style="color: #38bdf8;">Core</span></h1>
+                                        <p style="color: #94a3b8; font-size: 11px; margin: 4px 0 0 0; text-transform: uppercase; letter-spacing: 2px; font-weight: 600;">Enterprise Legal Tech & AI</p>
+                                    </td>
+                                    <!-- Etiqueta de Estado -->
+                                    <td align="right" style="vertical-align: middle;">
+                                        <span style="background-color: rgba(16, 185, 129, 0.15); color: #34d399; padding: 6px 14px; border-radius: 20px; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1.2px; border: 1px solid rgba(16, 185, 129, 0.3);">Licencia Activa</span>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- 2. SALUDO EXCLUSIVO Y AGRADECIMIENTO PROFUNDO -->
+                    <tr>
+                        <td style="padding: 45px 40px 25px 40px;">
+                            <h2 style="color: #0f172a; font-size: 22px; font-weight: 700; margin: 0 0 15px 0; letter-spacing: -0.3px;">Estimado/a [NombreUsuario],</h2>
+                            <p style="font-size: 15px; line-height: 1.8; color: #475569; margin: 0 0 15px 0;">
+                                En nombre de todo el equipo directivo y de ingeniería de <strong>ActaPro Core</strong>, queremos expresarle nuestro más sincero agradecimiento por elegirnos como su aliado tecnológico para la automatización jurídica y la gestión documental corporativa.
+                            </p>
+                            <p style="font-size: 15px; line-height: 1.8; color: #475569; margin: 0;">
+                                Le informamos que su proceso de adquisición se ha completado satisfactoriamente. Todos los recursos computacionales, cuotas de procesamiento y capacidades de inteligencia artificial correspondientes a su nuevo plan ya se encuentran plenamente provisionados y activos en su perfil.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- 3. TARJETA DE DETALLES DE LA SUSCRIPCIÓN Y MÉTRICAS -->
+                    <tr>
+                        <td style="padding: 0 40px 30px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+                                <tr>
+                                    <td style="background-color: #f1f5f9; padding: 14px 20px; border-bottom: 1px solid #e2e8f0;">
+                                        <span style="font-size: 11px; font-weight: bold; color: #475569; text-transform: uppercase; letter-spacing: 1px;">Detalles de la Suscripción y Capacidades</span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 20px;">
+                                        <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                            <tr>
+                                                <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 500;">Plan Contratado:</td>
+                                                <td align="right" style="padding: 8px 0; font-size: 14px; color: #0f172a; font-weight: bold; text-transform: uppercase;">[Plan]</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 500;">Inversión Procesada:</td>
+                                                <td align="right" style="padding: 8px 0; font-size: 14px; color: #059669; font-weight: bold;">$[Precio] COP</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 500;">Capacidad de Procesamiento de Audio:</td>
+                                                <td align="right" style="padding: 8px 0; font-size: 14px; color: #0f172a; font-weight: bold;">[Horas] hrs / mes</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 500;">Asignación de Tokens IA:</td>
+                                                <td align="right" style="padding: 8px 0; font-size: 14px; color: #0f172a; font-weight: bold;">[Tokens]</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; font-size: 14px; color: #64748b; font-weight: 500;">Nivel de Soporte Técnico:</td>
+                                                <td align="right" style="padding: 8px 0; font-size: 14px; color: #2563eb; font-weight: bold;">Prioritario Corporativo 24/7</td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- 4. GUÍA RÁPIDA DE INICIO -->
+                    <tr>
+                        <td style="padding: 0 40px 30px 40px;">
+                            <p style="font-size: 13px; font-weight: bold; color: #0f172a; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 18px 0;">¿Qué puede hacer ahora con su nueva licencia?</p>
+                            
+                            <!-- Ítem Guía 1 -->
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 14px;">
+                                <tr>
+                                    <td width="32" style="vertical-align: top;">
+                                        <div style="background-color: #10b981; color: #ffffff; width: 24px; height: 24px; border-radius: 50%; text-align: center; font-size: 12px; font-weight: bold; line-height: 24px;">✓</div>
+                                    </td>
+                                    <td style="vertical-align: middle; padding-left: 8px;">
+                                        <p style="font-size: 14px; color: #334155; margin: 0; line-height: 1.5;"><strong>Transcripción Autónoma:</strong> Ingrese grabaciones de audio o video de sus asambleas para un reconocimiento de voz con precisión jurídica.</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Ítem Guía 2 -->
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 14px;">
+                                <tr>
+                                    <td width="32" style="vertical-align: top;">
+                                        <div style="background-color: #10b981; color: #ffffff; width: 24px; height: 24px; border-radius: 50%; text-align: center; font-size: 12px; font-weight: bold; line-height: 24px;">✓</div>
+                                    </td>
+                                    <td style="vertical-align: middle; padding-left: 8px;">
+                                        <p style="font-size: 14px; color: #334155; margin: 0; line-height: 1.5;"><strong>Generación de Actas Formales:</strong> Estructure minutas, decisiones ejecutivas y acuerdos listos para su validación legal en segundos.</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Ítem Guía 3 -->
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td width="32" style="vertical-align: top;">
+                                        <div style="background-color: #10b981; color: #ffffff; width: 24px; height: 24px; border-radius: 50%; text-align: center; font-size: 12px; font-weight: bold; line-height: 24px;">✓</div>
+                                    </td>
+                                    <td style="vertical-align: middle; padding-left: 8px;">
+                                        <p style="font-size: 14px; color: #334155; margin: 0; line-height: 1.5;"><strong>Exportación Profesional:</strong> Descargue documentos normativos en formato PDF con diseño ejecutivo y marcas institucionales.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- 5. BOTÓN DE ACCIÓN PRINCIPAL (CTA) -->
+                    <tr>
+                        <td align="center" style="padding: 10px 40px 40px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td align="center">
+                                        <a href="https://actaprocore.com/dashboard" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 16px 40px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); letter-spacing: 0.3px;">Acceder a mi Panel de Control</a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- 6. SECCIÓN DE ASISTENCIA Y CONTACTO INSTITUCIONAL -->
+                    <tr>
+                        <td style="padding: 0 40px 35px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-top: 1px solid #e2e8f0; padding-top: 25px;">
+                                <tr>
+                                    <td>
+                                        <p style="font-size: 13px; color: #64748b; margin: 0; line-height: 1.6;">
+                                            ¿Requiere asistencia técnica especializada o tiene consultas sobre configuraciones avanzadas para su organización? Nuestro equipo de ingenieros está a su entera disposición en <a href="mailto:soporteactaprocore@gmail.com" style="color: #2563eb; text-decoration: none; font-weight: 600;">soporte@actaprocore.com</a>.
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- 7. FOOTER CORPORATIVO -->
+                    <tr>
+                        <td align="center" style="background-color: #0f172a; padding: 35px 40px;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td align="center">
+                                        <p style="font-size: 12px; color: #94a3b8; margin: 0 0 10px 0; font-weight: 500;">Este mensaje corresponde a una notificación oficial del sistema de <strong>ActaPro Core</strong>.</p>
+                                        <p style="font-size: 11px; color: #64748b; margin: 0;">
+                                            &copy; 2026 ActaPro Core. Todos los derechos reservados. 
+                                            <br>
+                                            <a href="https://actaprocore.com/terminos" target="_blank" style="color: #94a3b8; text-decoration: underline; margin-right: 10px;">Términos y Condiciones</a> | 
+                                            <a href="https://actaprocore.com/privacidad" target="_blank" style="color: #94a3b8; text-decoration: underline; margin-left: 10px;">Política de Privacidad</a>
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
                         """
+                        
                         enviar_correo_brevo(payer_email, nombre_usuario, asunto_correo, html_cuerpo)
 
                         return {"status": "success", "message": f"Licencia de {payer_email} actualizada a {plan_asignado}"}
