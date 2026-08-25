@@ -35,13 +35,12 @@ load_dotenv()
 # 0. Inicialización y Configuración General
 # ==========================================
 
-# REMOVIDO: redirect_slashes=False (para dejar que FastAPI resuelva coincidencias normales)
 app = FastAPI(
     title="ActaProCore API con MongoDB y Mercado Pago", 
     version="1.9.5"
 )
 
-# Lista de orígenes permitidos
+# Lista completa de orígenes permitidos
 origins = [
     "https://actaprocore.com",
     "https://www.actaprocore.com",
@@ -50,20 +49,21 @@ origins = [
     "https://dashboard-apc.actaprocore.com",
     "http://localhost",
     "http://localhost:3000",
-    "http://127.0.0.1:3000"
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173"
 ]
 
-# Configuración correcta de CORS usando la variable origins
+# Configuración estricta e impecable de CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # 👈 Usamos la lista completa definida arriba
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
 )
-
-# ELIMINADO: @app.options("/{full_path:path}")
-# El middleware CORSMiddleware ya maneja las peticiones OPTIONS automáticamente de forma nativa.
 
 # Configuración de Claves y Base de Datos
 AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
@@ -119,7 +119,7 @@ Tu misión es transformar la transcripción de audio adjunta en un ACTA FORMAL, 
 
 ORDEN DE TRABAJO (ESTRICTO):
 1. INTEGRIDAD DE LA INFORMACIÓN: NO RESUMAS EL CONTENIDO TÉCNICO NI LAS PROPUESTAS. Debes capturar todos los argumentos, cifras, justificaciones financieras, propuestas de mantenimiento y posturas de los copropietarios. Si alguien propone algo específico, inclúyelo detalladamente.
-2. FILTRADO DE RUIDO: ÚNICAMENTE elimina interrupciones, saludos, chismes, peleas personales o frases vacías que não aporten al objeto de la asamblea. Todo lo que tenga que ver con gestión, presupuesto, administración o decisiones debe quedar plasmado.
+2. FILTRADO DE RUIDO: ÚNICAMENTE elimina interrupciones, saludos, chismes, peleas personales o frases vacías que no aporten al objeto de la asamblea. Todo lo que tenga que ver con gestión, presupuesto, administración o decisiones debe quedar plasmado.
 3. ESTRUCTURA JURÍDICA:
    - ENCABEZADO Y QUÓRUM: Detalla la verificación de coeficientes si se menciona.
    - DESARROLLO PUNTO POR PUNTO: Para CADA punto del orden del día, redacta el desarrollo de forma narrativa pero minuciosa. Transcribe los debates relevantes ("El copropietario A solicitó aclarar X; el administrador respondió que Y").
@@ -187,8 +187,7 @@ class ConsultaFAQRequest(BaseModel):
 
 class ConsultaPlanRequest(BaseModel):
     clienteId: str
-    tipoProblema: str = None
-
+    tipoProblema: Optional[str] = None
 # ==========================================
 # 4. Función Auxiliar para Enviar Correos con Brevo
 # ==========================================
