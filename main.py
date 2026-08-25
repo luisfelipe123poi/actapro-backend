@@ -28,6 +28,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 from sib_api_v3_sdk.models import SendSmtpEmail, SendSmtpEmailSender, SendSmtpEmailTo
+from tu_modulo import task_procesar_asamblea  # Ajusta 'tu_modulo' según la estructura de tu proyecto
 
 load_dotenv()
 
@@ -885,7 +886,18 @@ def validar_calidad_audio(file_path: str):
         }
 
 
+import os
+import uuid
+from pathlib import Path
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
+
+TEMP_DIR = Path("temp_uploads")
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+# Un solo handler para ambos endpoints
 @app.post("/procesar-asamblea")
+@app.post("/procesar")
 async def procesar_asamblea(
     file: UploadFile = File(...),
     email: str = Form(...),
@@ -893,12 +905,17 @@ async def procesar_asamblea(
     nombre_personalizado: Optional[str] = Form(None)
 ):
     try:
-        # Guardar el archivo de audio temporalmente en disco para que el worker de Celery pueda leerlo
-        temp_audio_path = f"temp_uploads/{file.filename}"
-        with open(temp_audio_path, "wb") as buffer:
-            buffer.write(await file.read())
+        # Generar un nombre único para evitar colisiones en disco
+        file_extension = Path(file.filename).suffix
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        temp_audio_path = str(TEMP_DIR / unique_filename)
 
-        # Disparar la tarea asíncrona en Celery mediante .delay()
+        # Escritura por chunks para no colapsar la RAM con audios pesados
+        with open(temp_audio_path, "wb") as buffer:
+            while chunk := await file.read(1024 * 1024):  # Chunks de 1MB
+                buffer.write(chunk)
+
+        # Disparar la tarea en Celery
         task = task_procesar_asamblea.delay(
             temp_audio_path=temp_audio_path,
             email=email,
@@ -907,7 +924,6 @@ async def procesar_asamblea(
             original_filename=file.filename
         )
 
-        # Responder de inmediato al frontend con el ID de la tarea
         return {
             "status": "pending",
             "task_id": task.id,
@@ -915,22 +931,13 @@ async def procesar_asamblea(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error iniciando la tarea: {str(e)}")
-
-@app.post("/procesar")
-async def procesar_alias(
-    file: UploadFile = File(...),
-    email: str = Form(...),
-    instrucciones: Optional[str] = Form(None),
-    nombre_personalizado: Optional[str] = Form(None)
-):
-    # Llama a la misma función del endpoint procesar-asamblea
-    return await procesar_asamblea(
-        file=file,
-        email=email,
-        instrucciones=instrucciones,
-        nombre_personalizado=nombre_personalizado
-    )
+        # Si falló la subida, limpiar el archivo parcial si alcanzó a crearse
+        if 'temp_audio_path' in locals() and os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error iniciando la tarea: {str(e)}"
+        )
 
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
