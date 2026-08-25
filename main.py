@@ -41,6 +41,9 @@ app = FastAPI(title="ActaProCore API con MongoDB y Mercado Pago", version="1.9.5
 origins = [
     "https://actaprocore.com",
     "https://www.actaprocore.com",
+    "https://cotizaciones-apc.actaprocore.com",
+    "https://admin-licencias.actaprocore.com",
+    "https://dashboard-apc.actaprocore.com",
     "http://localhost",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
