@@ -1749,7 +1749,7 @@ async def verificar_plan(req: ConsultaPlanRequest):
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
-import datetime
+
 from bson import ObjectId
 
 # (Asegúrate de tener configurado tu cliente de Motor/MongoDB en tu app, por ejemplo:
