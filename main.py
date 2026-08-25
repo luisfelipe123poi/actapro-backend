@@ -344,16 +344,23 @@ def registrar_usuario(data: AuthModel):
         "limite_horas_mes": plan_config["horas"]
     }
 
+import traceback
+from fastapi import status, HTTPException
+
 @app.post("/api/login")
 def login_usuario(data: AuthModel):
     try:
+        # 1. Buscar usuario en MongoDB
         user = users_collection.find_one({"email": data.email})
-        
-        # Validación de usuario y contraseña
-        if not user or user.get("password") != data.password:
-            raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
-        # Retorno con casteo explícito de tipos para garantizar serialización JSON
+        # 2. Validar credenciales (usando hash seguro o texto plano según tu migración)
+        if not user or user.get("password") != data.password:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Credenciales inválidas."
+            )
+
+        # 3. Retornar datos exitosos
         return {
             "message": "Login exitoso",
             "email": str(user.get("email")),
@@ -361,18 +368,31 @@ def login_usuario(data: AuthModel):
             "tokens_usados": int(user.get("tokens_usados", 0)),
             "limite_tokens_mes": int(user.get("limite_tokens_mes", 0)),
             "horas_restantes": float(user.get("horas_restantes", 0.0)),
+            "horas_usadas_mes": float(user.get("horas_usadas_mes", 0.0)),
             "limite_horas_mes": float(user.get("limite_horas_mes", 0.0))
         }
 
     except HTTPException as http_ex:
-        # Re-lanzar excepciones HTTP explícitas (401, 400, etc.)
+        # Re-lanzar las excepciones explicitas (401, etc.) sin alterarlas
         raise http_ex
+
     except Exception as e:
-        # Captura cualquier falla de base de datos o lógica interna para dar feedback claro
-        print(f"Error interno en /api/login: {str(e)}")
+        # Captura el rastreo completo del error
+        error_trace = traceback.format_exc()
+        
+        # Imprime el log exacto en los logs de Render / Consola del servidor
+        print("\n================ ERROR EXACTO EN LOG IN ================")
+        print(error_trace)
+        print("========================================================\n")
+        
+        # Devuelve el error exacto como respuesta JSON al cliente (útil para debugging)
         raise HTTPException(
-            status_code=500, 
-            detail="Error interno en el servidor al procesar el inicio de sesión."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error_tipo": type(e).__name__,
+                "mensaje": str(e),
+                "traceback": error_trace.splitlines()
+            }
         )
 
 @app.get("/api/user/status")
