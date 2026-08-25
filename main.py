@@ -57,20 +57,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from fastapi import Response
-
-# Manejador explícito para peticiones preflight (OPTIONS)
-@app.options("/{full_path:path}")
-async def options_handler(full_path: str):
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "https://actaprocore.com",
-            "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            "Access-Control-Allow-Credentials": "true",
-        },
-    )
 
 # Configuración de Claves y Base de Datos
 AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
