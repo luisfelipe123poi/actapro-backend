@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Si existe la variable REDIS_URL en Render la usa; si estás en local, usa localhost por defecto
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://red-da6uafrncjis73f70rgg:6379")
 
 celery_app = Celery(
     "actapro_tasks",
