@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel
 from typing import Optional
@@ -1768,20 +1769,20 @@ class ContactoEnterprise(BaseModel):
     empleados: int
     mensaje: Optional[str] = None
 
+
+
 # ==========================================
 # 1. ENDPOINT PARA GUARDAR COTIZACIÓN (POST)
 # ==========================================
 @app.post("/api/contacto-enterprise")
 async def recibir_contacto_enterprise(datos: ContactoEnterprise):
     try:
-        # Preparamos el documento con fecha UTC actual y estado por defecto
         nuevo_lead = datos.model_dump()
         
-        # Corrección de la llamada a datetime (usando la clase correcta del módulo)
+        # Genera la fecha ISO en formato UTC correctamente
         nuevo_lead["fecha"] = datetime.now(timezone.utc).isoformat()
         nuevo_lead["estado"] = "Pendiente"
         
-        # Guardado síncrono en MongoDB
         resultado_db = db.cotizaciones.insert_one(nuevo_lead)
         
         print(f"Nueva solicitud Enterprise guardada con ID: {resultado_db.inserted_id}")
@@ -1796,7 +1797,6 @@ async def recibir_contacto_enterprise(datos: ContactoEnterprise):
             "success": False, 
             "message": str(e)
         }
-
 # ==========================================
 # 2. ENDPOINT PARA EL PANEL DE ADMINISTRACIÓN (GET)
 # ==========================================
