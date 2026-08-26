@@ -495,92 +495,7 @@ from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY, TA_CENTER
 
 from fastapi.responses import RedirectResponse
 
-# ==============================================================================
-# ENDPOINT DE DESCARGA DE ACTAS (Aislamiento por usuario + Redirección a R2/S3)
-# ==============================================================================
-@app.get("/api/actas/descargar/{acta_id}")
-async def descargar_acta(acta_id: str, email: str):
-    """
-    Permite descargar un acta por su ObjectId de MongoDB o por su nombre de archivo.
-    Garantiza aislamiento validando que pertenezca al email del usuario en sesión.
-    Si existe 'file_url', redirige directamente a la CDN en Cloudflare R2.
-    De lo contrario, construye dinámicamente el documento Word (.docx) como plan de respaldo.
-    """
-    acta = None
-    
-    # 1. Intentar buscar por ObjectId si la cadena es un BSON ID válido
-    if ObjectId.is_valid(acta_id):
-        try:
-            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-        except Exception as e:
-            print(f"Error al consultar por ObjectId: {e}")
 
-    # 2. Si no se encontró por ID (o acta_id era el nombre del archivo), buscar por nombre_acta
-    if not acta:
-        acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
-        
-    # 3. Si aún no existe, buscar por el campo 'acta_id' guardado como string (Compatibilidad)
-    if not acta:
-        acta = actas_collection.find_one({"acta_id": acta_id, "email": email})
-
-    # 4. Aislamiento / Validación: Si no existe o no coincide con el email
-    if not acta:
-        raise HTTPException(
-            status_code=404, 
-            detail="El acta solicitada no existe o no tienes permisos para acceder a ella."
-        )
-
-    # 5. Opción Principal: Redirección limpia a CDN / Cloudflare R2 si existe la URL pública
-    file_url = acta.get("file_url")
-    if file_url:
-        return RedirectResponse(url=file_url, status_code=303)
-
-    # 6. Plan de Respaldo: Generación al vuelo de documento .docx si el acta es antigua sin file_url
-    contenido_texto = acta.get("contenido", "") or acta.get("transcripcion", "")
-    nombre_archivo = acta.get("nombre_acta") or f"Acta_Asamblea_{acta_id[:8]}.docx"
-    
-    if not nombre_archivo.endswith(".docx"):
-        nombre_archivo += ".docx"
-
-    doc = Document()
-    
-    # Encabezado principal del documento
-    titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
-    titulo_principal.alignment = 1 # Centrado
-
-    # Parser simple de Markdown a Word (Encabezados y Negritas)
-    for linea in contenido_texto.split("\n"):
-        linea_clean = linea.strip()
-        if not linea_clean:
-            continue
-
-        if linea_clean.startswith("# "):
-            doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
-        elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
-            doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
-        else:
-            p = doc.add_paragraph()
-            if "**" in linea_clean:
-                partes = linea_clean.split("**")
-                for i, parte in enumerate(partes):
-                    if parte:
-                        run = p.add_run(parte)
-                        if i % 2 == 1: # Índice impar = Texto en negrita
-                            run.bold = True
-            else:
-                p.add_run(linea_clean)
-
-    # Guardar documento en memoria
-    doc_io = BytesIO()
-    doc.save(doc_io)
-    doc_io.seek(0)
-
-    # Retorno directo como Stream de Bytes Word
-    return Response(
-        content=doc_io.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
-    )
 
 
 # ==========================================
@@ -912,34 +827,59 @@ async def procesar_asamblea(
 
 from fastapi.responses import RedirectResponse
 
+from io import BytesIO
+from bson import ObjectId
+from docx import Document
+from fastapi import HTTPException, Response
+from fastapi.responses import RedirectResponse
+
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
-    # 1. Buscar en MongoDB por ID o nombre asegurando el aislamiento del usuario
+    """
+    Endpoint seguro para descargar actas con aislamiento por usuario.
+    Redirige a Cloudflare R2 si existe URL o genera el Word al vuelo como respaldo.
+    """
     acta = None
-    try:
-        acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-    except Exception:
-        pass
-        
+    
+    # 1. Buscar por ObjectId de MongoDB de forma segura
+    if ObjectId.is_valid(acta_id):
+        try:
+            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+        except Exception as e:
+            print(f"Error al consultar por ObjectId: {e}")
+            
+    # 2. Si no se encontró, buscar por nombre_acta
     if not acta:
         acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
         
+    # 3. Si aún no existe, buscar por el campo acta_id en texto plano
     if not acta:
-        raise HTTPException(status_code=404, detail="Acta no encontrada.")
+        acta = actas_collection.find_one({"acta_id": acta_id, "email": email})
         
-    # 2. Si ya guardamos el archivo en R2, redirigimos directamente a su URL pública (cdn.actaprocore.com)
+    # 4. Validar existencia y permisos (Aislamiento de usuario)
+    if not acta:
+        raise HTTPException(
+            status_code=404, 
+            detail="El acta solicitada no existe o no tienes permisos para acceder a ella."
+        )
+        
+    # 5. Opción Principal: Redirección directa a Cloudflare R2 (CDN)
     file_url = acta.get("file_url")
     if file_url:
         return RedirectResponse(url=file_url, status_code=303)
 
-    # 3. Plan de respaldo (por si el acta es antigua y no tiene file_url en la BD)
-    contenido_texto = acta.get("contenido", "")
-    nombre_archivo = acta.get("nombre_acta", "Acta_Asamblea.docx")
+    # 6. Plan de Respaldo: Generación dinámica del documento Word (.docx)
+    contenido_texto = acta.get("contenido", "") or acta.get("transcripcion", "")
+    nombre_archivo = acta.get("nombre_acta") or f"Acta_Asamblea_{acta_id[:8]}.docx"
     
+    if not nombre_archivo.endswith(".docx"):
+        nombre_archivo += ".docx"
+
     doc = Document()
     titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
-    titulo_principal.alignment = 1
+    titulo_principal.alignment = 1 # Centrado
 
+    # Parser básico de formato Markdown a Word
     for linea in contenido_texto.split("\n"):
         linea_clean = linea.strip()
         if not linea_clean:
@@ -956,11 +896,12 @@ async def descargar_acta(acta_id: str, email: str):
                 for i, parte in enumerate(partes):
                     if parte:
                         run = p.add_run(parte)
-                        if i % 2 == 1:
+                        if i % 2 == 1: # Texto en negrita
                             run.bold = True
             else:
                 p.add_run(linea_clean)
 
+    # Guardar en memoria y retornar como archivo descargable
     doc_io = BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
@@ -2126,8 +2067,10 @@ def obtener_metricas_sistema():
         try:
             db_stats = db.command("dbStats")
         except Exception:
+            # Fallback seguro si el usuario de la BD no cuenta con privilegios de admin stats
             db_stats = {"dataSize": 0, "indexSize": 0, "storageSize": 0, "connections": {"current": 1, "available": 8190}}
 
+        # Cálculo exacto de almacenamiento físico en MB y GB (Datos + Índices)
         total_bytes_storage = db_stats.get("storageSize", 0) or (db_stats.get("dataSize", 0) + db_stats.get("indexSize", 0))
         almacenamiento_gb = round(total_bytes_storage / (1024 * 1024 * 1024), 3)
         almacenamiento_mb = round(total_bytes_storage / (1024 * 1024), 2)
@@ -2151,29 +2094,31 @@ def obtener_metricas_sistema():
         except Exception:
             pass
 
+        # Extracción y estimaciones inteligentes de respaldo
         tokens_consumidos_total = res_actas[0].get("total_tokens", 0) if res_actas and res_actas[0].get("total_tokens") else (total_actas * 1850)
+        
+        # Costo OpenAI
         gasto_openai_total = res_actas[0].get("gasto_openai", 0.0) if res_actas and res_actas[0].get("gasto_openai") else (total_actas * 0.0035)
         
+        # Costo y Minutos de AssemblyAI con Diarización de Voces
         segundos_audio_total = res_actas[0].get("segundos_totales_audio", 0) if res_actas and res_actas[0].get("segundos_totales_audio") else (total_scanners * 300)
         gasto_assembly_total = res_actas[0].get("gasto_assembly", 0.0) if res_actas and res_actas[0].get("gasto_assembly") else (segundos_audio_total * 0.0004)
         
+        # Conversión exacta a minutos de AssemblyAI
         minutos_assembly_calculados = round(segundos_audio_total / 60.0, 2)
+
+        # Costo Cloudflare R2 Storage ($0.015 USD por GB al mes)
         gasto_r2_storage = almacenamiento_gb * 0.015
 
+        # Gasto Global Acumulado Total en USD
         gasto_total_usd = gasto_openai_total + gasto_assembly_total + gasto_r2_storage
         costo_promedio_acta = (gasto_total_usd / total_actas) if total_actas > 0 else 0.0
 
-        # =========================================================================
-        # SALDOS / CRÉDITOS REALES DISPONIBLES EN PROVEEDORES 
-        # (Modifica estos valores oéctalos a tus variables de entorno / API externa si procede)
-        # =========================================================================
-        OPENAI_SALDO_REAL_USD = 18.50  # <-- Reemplaza con tu saldo real o consulta dinámica
-        ASSEMBLY_SALDO_REAL_USD = 48.80 # <-- Reemplaza con tu saldo real o consulta dinámica
-
         # 3. Métricas de Capacidad y Procesamiento (Hilos y Celery)
-        max_capacity = 25
-        active_tasks = 0
-        queue_size = 0
+        max_capacity = 25       # Capacidad máxima concurrentemente soportada
+        active_tasks = 0        # Tareas Celery en ejecución activa
+        queue_size = 0          # Tareas aguardando slot en broker
+
         porcentaje_uso = (active_tasks / max_capacity * 100) if max_capacity > 0 else 0
 
         # 4. Telemetría Broker (Redis / Celery)
@@ -2193,30 +2138,29 @@ def obtener_metricas_sistema():
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "recomendacion": "Infraestructura operando con parámetros óptimos de latencia, almacenamiento y costo." if porcentaje_uso < 80 else "Alta concurrencia detectada. Se recomienda escalar workers de Celery.",
             
+            # Volumetría Global
             "metrics": {
                 "total_usuarios": total_usuarios,
                 "total_actas_generadas": total_actas,
                 "total_escaneos": total_scanners,
             },
 
+            # FinOps & Desglose Financiero Multi-Servicio (OpenAI, AssemblyAI Diarización, Cloudflare R2)
             "financials": {
                 "gasto_total_usd": round(gasto_total_usd, 2),
                 "costo_promedio_acta_usd": round(costo_promedio_acta, 4),
                 "tokens_consumidos_total": tokens_consumidos_total,
                 "almacenamiento_gb_usado": almacenamiento_gb,
                 "almacenamiento_mb_usado": almacenamiento_mb,
+                # Desglose específico solicitado y mapeo exacto de minutos AssemblyAI
                 "gasto_openai_usd": round(gasto_openai_total, 2),
                 "gasto_assembly_diarizacion_usd": round(gasto_assembly_total, 2),
                 "minutos_assembly": minutos_assembly_calculados,
                 "assembly_minutes": minutos_assembly_calculados,
-                "assembly_minutos_total": minutos_assembly_calculados,
-                "gasto_r2_storage_usd": round(gasto_r2_storage, 4),
-                
-                # CAMPOS NUEVOS CON LA INFORMACIÓN REAL DE SALDOS DISPONIBLES:
-                "openai_saldo_restante_usd": OPENAI_SALDO_REAL_USD,
-                "assembly_saldo_restante_usd": ASSEMBLY_SALDO_REAL_USD
+                "gasto_r2_storage_usd": round(gasto_r2_storage, 4)
             },
 
+            # Telemetría Avanzada de MongoDB (dbStats)
             "mongodb": {
                 "conexiones_activas": conexiones_activas_db,
                 "conexiones_disponibles": conexiones_disponibles_db,
@@ -2225,6 +2169,7 @@ def obtener_metricas_sistema():
                 "storage_size_bytes": total_bytes_storage
             },
 
+            # Telemetría de Capacidad
             "performance": {
                 "max_capacity": max_capacity,
                 "active_tasks": active_tasks,
@@ -2232,6 +2177,7 @@ def obtener_metricas_sistema():
                 "queue_size": queue_size,
             },
 
+            # Aliases de retrocompatibilidad con frontend
             "procesamiento_en_vivo": {
                 "usuarios_procesando_ahora": active_tasks,
                 "capacidad_concurrente_max": max_capacity,
@@ -2239,6 +2185,7 @@ def obtener_metricas_sistema():
                 "usuarios_en_espera_cola": queue_size
             },
 
+            # Broker Redis Status
             "redis": {
                 "status": redis_status,
                 "connections": redis_connections,
