@@ -1,8 +1,3 @@
-# 1. PARCHEO DE MONKEY (DEBE IR EN LA PRIMERA LÍNEA ABSOLUTA)
-# Permite que Celery procese hasta 50+ tareas I/O en paralelo con gevent sin bloquear eventos.
-from gevent import monkey
-monkey.patch_all()
-
 import os
 from celery import Celery
 from dotenv import load_dotenv
