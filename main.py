@@ -906,21 +906,29 @@ async def procesar_asamblea(
     instrucciones: Optional[str] = Form(None),
     nombre_personalizado: Optional[str] = Form(None)
 ):
-    temp_audio_path = None
     try:
-        # Generar un nombre único para evitar colisiones en disco
+        # Generar un nombre único para el archivo en la nube
         file_extension = Path(file.filename).suffix
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
-        temp_audio_path = str(TEMP_DIR.resolve() / unique_filename)
+        unique_filename = f"audios/{uuid.uuid4()}{file_extension}"
+        
+        # Leer los bytes del archivo directamente de la petición
+        file_bytes = await file.read()
 
-        # Escritura por chunks para no colapsar la RAM
-        with open(temp_audio_path, "wb") as buffer:
-            while chunk := await file.read(1024 * 1024):  # Chunks de 1MB
-                buffer.write(chunk)
+        # Subir el archivo directamente a Cloudflare R2
+        s3 = get_r2_client()
+        s3.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=unique_filename,
+            Body=file_bytes,
+            ContentType=file.content_type or "audio/mpeg"
+        )
 
-        # Disparar la tarea en Celery pasando rutas absolutas seguras
+        # Construir la URL pública accesible por el Worker de Celery y AssemblyAI
+        audio_url = f"{R2_PUBLIC_URL.rstrip('/')}/{unique_filename}"
+
+        # Disparar la tarea en Celery pasando la URL web en lugar de una ruta local
         task = task_procesar_asamblea.delay(
-            temp_audio_path=temp_audio_path,
+            temp_audio_path=audio_url,
             email=email,
             instrucciones=instrucciones,
             nombre_personalizado=nombre_personalizado,
@@ -930,15 +938,13 @@ async def procesar_asamblea(
         return {
             "status": "pending",
             "task_id": task.id,
-            "message": "Procesamiento de asamblea iniciado correctamente."
+            "message": "Procesamiento de asamblea iniciado correctamente en la nube."
         }
 
     except Exception as e:
-        if temp_audio_path and os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error iniciando la tarea: {str(e)}"
+            detail=f"Error iniciando la tarea en la nube: {str(e)}"
         )
 
 @app.get("/api/actas/descargar/{acta_id}")
