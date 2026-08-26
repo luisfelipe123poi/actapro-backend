@@ -2079,6 +2079,42 @@ def listar_licencias_endpoint():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+import os
+import boto3
+from botocore.config import Config
+
+# Credenciales y configuración de Cloudflare R2 (S3 compatible)
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL") # Ej: https://tu-bucket.r2.dev
+
+def get_r2_client():
+    return boto3.client(
+        's3',
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        config=Config(signature_version='s3v4'),
+        region_name='auto'
+    )
+
+def subir_bytes_a_r2(file_bytes: bytes, filename: str, content_type: str) -> str:
+    s3 = get_r2_client()
+    
+    # Subir archivo al bucket
+    s3.put_object(
+        Bucket=R2_BUCKET_NAME,
+        Key=filename,
+        Body=file_bytes,
+        ContentType=content_type
+    )
+    
+    # Retornar la URL pública accesible por cualquier servicio (incluyendo Celery)
+    return f"{R2_PUBLIC_URL.rstrip('/')}/{filename}"
+    
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
 
