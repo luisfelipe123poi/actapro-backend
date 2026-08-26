@@ -492,132 +492,66 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY, TA_CENTER
 
-@app.get("/api/actas/descargar-pdf/{acta_id}")
-async def descargar_acta_pdf(acta_id: str, email: str):
+from fastapi.responses import RedirectResponse
+
+@app.get("/api/actas/descargar/{acta_id}")
+async def descargar_acta(acta_id: str, email: str):
+    # 1. Buscar en MongoDB por ID o nombre asegurando el aislamiento del usuario
+    acta = None
     try:
-        # Buscar el acta en la base de datos por nombre o por _id de MongoDB
-        acta = actas_collection.find_one({"email": email, "nombre_acta": acta_id})
-        if not acta:
-            try:
-                acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-            except Exception:
-                pass
-                
-        if not acta:
-            raise HTTPException(status_code=404, detail="Acta no encontrada.")
-            
-        contenido_texto = acta.get("contenido", "")
-        nombre_archivo = acta.get("nombre_acta", "acta").replace(".docx", "").replace(".pdf", "").strip() + ".pdf"
+        acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+    except Exception:
+        pass
         
-        # Configuración del PDF en memoria usando ReportLab Platypus
-        pdf_buffer = io.BytesIO()
+    if not acta:
+        acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
         
-        doc = SimpleDocTemplate(
-            pdf_buffer, 
-            pagesize=letter,
-            rightMargin=54,
-            leftMargin=54,
-            topMargin=54,
-            bottomMargin=54
-        )
+    if not acta:
+        raise HTTPException(status_code=404, detail="Acta no encontrada.")
         
-        story = []
-        
-        # Estilos profesionales
-        styles = getSampleStyleSheet()
-        
-        title_style = ParagraphStyle(
-            'ActaMainTitle',
-            parent=styles['Heading1'],
-            fontName='Helvetica-Bold',
-            fontSize=14,
-            leading=18,
-            alignment=TA_CENTER,
-            spaceAfter=15,
-            textColor=styles['Normal'].textColor
-        )
-        
-        subtitle_style = ParagraphStyle(
-            'ActaSubTitle',
-            parent=styles['Heading2'],
-            fontName='Helvetica-Bold',
-            fontSize=11,
-            leading=15,
-            alignment=TA_LEFT,
-            spaceBefore=10,
-            spaceAfter=6,
-            textColor=styles['Normal'].textColor
-        )
-        
-        body_style = ParagraphStyle(
-            'ActaBody',
-            parent=styles['Normal'],
-            fontName='Helvetica',
-            fontSize=10,
-            leading=14,
-            alignment=TA_JUSTIFY,
-            spaceAfter=8
-        )
-        
-        bullet_style = ParagraphStyle(
-            'ActaBullet',
-            parent=body_style,
-            leftIndent=15,
-            spaceAfter=4
-        )
-        
-        # Añadir título principal al documento
-        story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
-        story.append(Spacer(1, 10))
-        
-        # Procesar el contenido línea por línea
-        lineas = contenido_texto.split('\n')
-        for linea in lineas:
-            linea_original = linea.strip()
-            
-            if not linea_original:
-                story.append(Spacer(1, 6))
-                continue
-                
-            es_encabezado_md = linea_original.startswith('#')
-            texto_limpio = linea_original.lstrip('#').strip()
-            
-            # Limpieza de caracteres de escape HTML básicos
-            texto_limpio = texto_limpio.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            
-            # Convertir negritas de Markdown (**texto**) a etiquetas de ReportLab (<b>texto</b>)
-            texto_limpio = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', texto_limpio)
-            
-            # Eliminar asteriscos sueltos o viñetas de markdown remanentes
-            texto_limpio = re.sub(r'^[\*\-\•]\s*', '', texto_limpio)
-            texto_limpio = texto_limpio.replace('*', '')
+    # 2. Si ya guardamos el archivo en R2, redirigimos directamente a su URL pública (cdn.actaprocore.com)
+    file_url = acta.get("file_url")
+    if file_url:
+        return RedirectResponse(url=file_url, status_code=303)
 
-            if not texto_limpio:
-                continue
+    # 3. Plan de respaldo (por si el acta es antigua y no tiene file_url en la BD)
+    contenido_texto = acta.get("contenido", "")
+    nombre_archivo = acta.get("nombre_acta", "Acta_Asamblea.docx")
+    
+    doc = Document()
+    titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
+    titulo_principal.alignment = 1
 
-            # Lógica de asignación de estilos inteligente
-            if es_encabezado_md or (texto_limpio.isupper() and len(texto_limpio) < 80):
-                story.append(Paragraph(texto_limpio, subtitle_style))
-            elif linea_original.startswith(('*', '-', '•')):
-                story.append(Paragraph(f"• {texto_limpio}", bullet_style))
+    for linea in contenido_texto.split("\n"):
+        linea_clean = linea.strip()
+        if not linea_clean:
+            continue
+
+        if linea_clean.startswith("# "):
+            doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
+        elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
+            doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
+        else:
+            p = doc.add_paragraph()
+            if "**" in linea_clean:
+                partes = linea_clean.split("**")
+                for i, parte in enumerate(partes):
+                    if parte:
+                        run = p.add_run(parte)
+                        if i % 2 == 1:
+                            run.bold = True
             else:
-                story.append(Paragraph(texto_limpio, body_style))
+                p.add_run(linea_clean)
 
-        # Construir el PDF
-        doc.build(story)
-        pdf_buffer.seek(0)
-        
-        return Response(
-            content=pdf_buffer.getvalue(),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
-        )
-        
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        print(f"Error generando PDF: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error interno al generar el PDF: {str(e)}")
+    doc_io = BytesIO()
+    doc.save(doc_io)
+    doc_io.seek(0)
+
+    return Response(
+        content=doc_io.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
+    )
 
 
 # ==========================================
@@ -947,6 +881,8 @@ async def procesar_asamblea(
             detail=f"Error iniciando la tarea en la nube: {str(e)}"
         )
 
+from fastapi.responses import RedirectResponse
+
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
     # 1. Buscar en MongoDB por ID o nombre asegurando el aislamiento del usuario
@@ -962,12 +898,14 @@ async def descargar_acta(acta_id: str, email: str):
     if not acta:
         raise HTTPException(status_code=404, detail="Acta no encontrada.")
         
+    # 2. Si ya guardamos el archivo en R2, redirigimos directamente a su URL pública (cdn.actaprocore.com)
+    file_url = acta.get("file_url")
+    if file_url:
+        return RedirectResponse(url=file_url, status_code=303)
+
+    # 3. Plan de respaldo (por si el acta es antigua y no tiene file_url en la BD)
     contenido_texto = acta.get("contenido", "")
     nombre_archivo = acta.get("nombre_acta", "Acta_Asamblea.docx")
-    
-    # 2. Recrear el archivo .docx temporalmente con formato completo
-    os.makedirs("temp_outputs", exist_ok=True)
-    temp_path = f"temp_outputs/download_{acta_id}.docx"
     
     doc = Document()
     titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
@@ -994,12 +932,14 @@ async def descargar_acta(acta_id: str, email: str):
             else:
                 p.add_run(linea_clean)
 
-    doc.save(temp_path)
-    
-    return FileResponse(
-        path=temp_path,
-        filename=nombre_archivo,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    doc_io = BytesIO()
+    doc.save(doc_io)
+    doc_io.seek(0)
+
+    return Response(
+        content=doc_io.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
     )
 
 import os
@@ -1047,6 +987,13 @@ async def escanear_documento(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error iniciando el escaneo: {str(e)}")
         
+import io
+import re
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+
 @app.get("/api/actas/descargar-pdf/{acta_id}")
 async def descargar_acta_pdf(acta_id: str, email: str):
     # Buscar el acta en la base de datos por _id de MongoDB o por nombre
@@ -1108,7 +1055,6 @@ async def descargar_acta_pdf(acta_id: str, email: str):
     lineas = contenido_texto.split('\n')
     for linea in lineas:
         linea_limpia = linea.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        import re
         linea_limpia = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', linea_limpia)
         linea_limpia = linea_limpia.replace('*', '').strip()
         
@@ -1123,7 +1069,7 @@ async def descargar_acta_pdf(acta_id: str, email: str):
     return Response(
         content=pdf_buffer.getvalue(),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo_pdf}"'}
     )
 
 
