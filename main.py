@@ -2095,32 +2095,24 @@ def subir_bytes_a_r2(file_bytes: bytes, filename: str, content_type: str) -> str
     # Retornar la URL pública accesible por cualquier servicio (incluyendo Celery)
     return f"{R2_PUBLIC_URL.rstrip('/')}/{filename}"
 
-from fastapi import APIRouter
-from celery_app import celery_app
-import redis
-import os
 
-router = APIRouter()
 
 @router.get("/admin/metrics")
 def obtener_metricas_sistema():
-    # 1. Inspeccionar tareas de Celery
+    # 1. Inspeccionar tareas de Celery (Inspección rápida)
     inspector = celery_app.control.inspect()
     
-    # Tareas ejecutándose en este instante
     activas = inspector.active() or {}
     total_activas = sum(len(tasks) for tasks in activas.values())
     
-    # Tareas reservadas/en cola esperando turno
     reservadas = inspector.reserved() or {}
     total_en_cola = sum(len(tasks) for tasks in reservadas.values())
 
-    # 2. Estado de Redis (Memoria y Conexiones)
-    r = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    # 2. Reutilizar la conexión del pool a Redis
+    r = redis.Redis(connection_pool=pool)
     redis_info = r.info()
     
     # 3. Determinar estado de salud
-    # Recordando que la concurrencia máxima configurada en Celery es 25-50
     concurrencia_maxima = 25 
     saturado = total_activas >= concurrencia_maxima or total_en_cola > 10
 
