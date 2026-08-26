@@ -2102,20 +2102,53 @@ def subir_bytes_a_r2(file_bytes: bytes, filename: str, content_type: str) -> str
 @app.get("/api/admin/metrics")
 def obtener_metricas_sistema():
     """
-    Endpoint para proveer métricas del sistema al panel de infraestructura.
+    Endpoint para proveer métricas del sistema y estado de Celery/Redis
+    al panel de infraestructura.
     """
     try:
+        # Métricas de la base de datos MongoDB
         total_usuarios = users_collection.count_documents({})
         total_actas = actas_collection.count_documents({})
         total_scanners = scanners_historial_collection.count_documents({})
+
+        # Valores base de procesamiento para evitar división por cero (NaN / Infinity) en Frontend
+        max_capacity = 25      # Capacidad máxima de workers/hilos
+        active_tasks = 0       # Tareas Celery ejecutándose actualmente
+        queue_size = 0         # Tareas en cola de espera
         
+        # Cálculo seguro de porcentaje de uso
+        porcentaje_uso = (active_tasks / max_capacity * 100) if max_capacity > 0 else 0
+
+        # Estado e integración con Redis / Celery
+        redis_status = "offline"  # Cambiar a "online" si implementas ping a Redis
+        redis_connections = 0
+        redis_memory_usage = "N/A"
+
         return {
             "status": "online",
+            "system_state": "OPTIMO" if porcentaje_uso < 80 else "SATURADO",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            
+            # Métricas globales de la aplicación
             "metrics": {
                 "total_usuarios": total_usuarios,
                 "total_actas_generadas": total_actas,
                 "total_escaneos": total_scanners,
+            },
+
+            # Métricas de rendimiento y capacidad para el panel
+            "performance": {
+                "max_capacity": max_capacity,
+                "active_tasks": active_tasks,
+                "porcentaje_uso": porcentaje_uso,
+                "queue_size": queue_size,
+            },
+
+            # Estado del Broker (Redis / Celery)
+            "redis": {
+                "status": redis_status,
+                "connections": redis_connections,
+                "memory_usage": redis_memory_usage
             }
         }
     except Exception as e:
