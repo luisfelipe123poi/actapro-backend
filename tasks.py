@@ -30,18 +30,21 @@ scanners_historial_collection = db["scanners_historial"]
 PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Tu objetivo es redactar un acta formal, jurídica y detallada a partir de la transcripción de la asamblea provista, asegurando un formato profesional en Markdown y cumplimiento legal estricto."""
 
 
+import os
+import uuid
 import hashlib
-import requests  # Asegúrate de tener requests instalado o usa boto3 para descargar si lo prefieres
+from io import BytesIO
+import requests
+from docx import Document
+from datetime import datetime, timezone
+import assemblyai as aai
 
 @celery_app.task(bind=True)
 def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones: str, nombre_personalizado: str, original_filename: str):
     try:
         self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores desde la nube..."})
 
-        # Como temp_audio_path ahora es una URL pública (https://cdn.actaprocore.com/...),
-        # descargamos temporalmente los bytes o dejamos que AssemblyAI lo consuma directamente.
-        
-        # Para el cálculo del hash y caché, descargamos los bytes desde la URL de R2
+        # Descargamos temporalmente los bytes desde la URL de R2 para calcular el hash y caché
         response_audio = requests.get(temp_audio_path)
         if response_audio.status_code != 200:
             raise Exception(f"No se pudo descargar el archivo de audio desde la nube: {temp_audio_path}")
@@ -96,40 +99,53 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
         )
         acta_final = response.choices[0].message.content
 
-        os.makedirs("temp_outputs", exist_ok=True)
-        output_docx_path = f"temp_outputs/{session_id}_{nombre_archivo_acta}"
-
+        # Generar el documento Word en memoria (BytesIO) para evitar problemas con discos locales
         doc = Document()
         doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0).alignment = 1
         for linea in acta_final.split("\n"):
             if linea.strip():
                 doc.add_paragraph(linea.strip())
-        doc.save(output_docx_path)
+        
+        doc_io = BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
+        docx_bytes = doc_io.read()
 
-        peso_archivo = f"{round(os.path.getsize(output_docx_path) / 1024, 1)} KB"
+        # Subir el .docx directamente a Cloudflare R2
+        r2_docx_key = f"actas_generadas/{session_id}_{nombre_archivo_acta}"
+        s3 = get_r2_client()
+        s3.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=r2_docx_key,
+            Body=docx_bytes,
+            ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+        docx_url = f"{R2_PUBLIC_URL.rstrip('/')}/{r2_docx_key}"
+        peso_archivo = f"{round(len(docx_bytes) / 1024, 1)} KB"
+
         data_acta = {
             "email": email,
             "nombre_acta": nombre_archivo_acta,
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "peso": peso_archivo,
             "contenido": acta_final,
+            "file_url": docx_url  # Guardamos la URL pública del documento en MongoDB
         }
         inserted = actas_collection.insert_one(data_acta)
 
         return {
             "status": "COMPLETED",
             "acta_id": str(inserted.inserted_id),
-            "nombre_acta": nombre_archivo_acta
+            "nombre_acta": nombre_archivo_acta,
+            "file_url": docx_url
         }
 
     except Exception as exc:
         raise Exception(f"Fallo en la tarea de procesamiento: {str(exc)}")
 
     finally:
-        # Como temp_audio_path ya no es un archivo local, quitamos el os.remove(temp_audio_path).
-        # (Opcional: Si deseas borrar el archivo de Cloudflare R2 después de procesarlo, puedes hacerlo aquí con boto3).
         pass
-
 
 @celery_app.task(bind=True)
 def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str = None):
