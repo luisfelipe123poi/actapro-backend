@@ -9,7 +9,7 @@ from io import BytesIO
 import boto3
 from botocore.config import Config
 import requests
-import fitz  # PyMuPDF
+import pymupdf as fitz
 import pdfplumber
 from docx import Document
 from pymongo import MongoClient
