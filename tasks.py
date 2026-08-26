@@ -11,6 +11,26 @@ import pymupdf as fitz
 import pdfplumber
 from docx import Document
 from pymongo import MongoClient
+import os
+import boto3
+from botocore.config import Config
+
+# Credenciales y configuración de Cloudflare R2 (S3 compatible) para Celery
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "archivos-temporales-actaprocore")
+R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "https://cdn.actaprocore.com")
+
+def get_r2_client():
+    return boto3.client(
+        's3',
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        config=Config(signature_version='s3v4'),
+        region_name='auto'
+    )
 
 # Inicialización de clientes desde variables de entorno
 AAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
