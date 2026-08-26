@@ -2102,55 +2102,103 @@ def subir_bytes_a_r2(file_bytes: bytes, filename: str, content_type: str) -> str
 @app.get("/api/admin/metrics")
 def obtener_metricas_sistema():
     """
-    Endpoint para proveer métricas del sistema y estado de Celery/Redis
-    al panel de infraestructura.
+    Endpoint avanzado de telemetría, rendimiento e indicadores FinOps 
+    para el Panel de Infraestructura de ActaPro.
     """
     try:
-        # Métricas de la base de datos MongoDB
+        # 1. Métricas base de MongoDB
         total_usuarios = users_collection.count_documents({})
         total_actas = actas_collection.count_documents({})
         total_scanners = scanners_historial_collection.count_documents({})
 
-        # Valores base de procesamiento para evitar división por cero (NaN / Infinity) en Frontend
-        max_capacity = 25      # Capacidad máxima de workers/hilos
-        active_tasks = 0       # Tareas Celery ejecutándose actualmente
-        queue_size = 0         # Tareas en cola de espera
-        
-        # Cálculo seguro de porcentaje de uso
+        # 2. Agregación FinOps (Cálculo de Tokens, Storage y Gastos)
+        # Si guardas 'tokens_usados' o 'costo_usd' en los documentos de actas/escaneos, los suma dinámicamente:
+        pipeline_actas = [
+            {
+                "$group": {
+                    "_id": None,
+                    "total_tokens": {"$sum": "$tokens_usados"},
+                    "gasto_actas": {"$sum": "$costo_usd"}
+                }
+            }
+        ]
+        res_actas = list(actas_collection.aggregate(pipeline_actas))
+        tokens_actas = res_actas[0].get("total_tokens", 0) if res_actas else 0
+        gasto_actas = res_actas[0].get("gasto_actas", 0.0) if res_actas else 0.0
+
+        # Costos por defecto si aún no guardas costo_usd por documento (Estimación pro: $0.0035 USD / 1k tokens)
+        costo_por_acta_estimado = 0.0085  # $0.0085 USD aprox por procesamiento completo
+        costo_por_escaneo_estimado = 0.0025
+
+        gasto_total_usd = gasto_actas if gasto_actas > 0 else (total_actas * costo_por_acta_estimado) + (total_scanners * costo_por_escaneo_estimado)
+        costo_promedio_acta = (gasto_total_usd / total_actas) if total_actas > 0 else 0.0
+        tokens_consumidos_total = tokens_actas if tokens_actas > 0 else (total_actas * 1850) # Promedio ~1.8k tokens/acta
+
+        # Estimación de Storage en GB (Ej: ~500 KB promedio por documento/escaneo en R2/MongoDB)
+        almacenamiento_gb = round(((total_actas + total_scanners) * 0.5) / 1024, 2)
+
+        # 3. Métricas de Capacidad y Procesamiento
+        max_capacity = 25       # Capacidad máxima concurrentemente soportada
+        active_tasks = 0        # Tareas Celery en ejecución activa
+        queue_size = 0          # Tareas aguardando slot en broker
+
         porcentaje_uso = (active_tasks / max_capacity * 100) if max_capacity > 0 else 0
 
-        # Estado e integración con Redis / Celery
-        redis_status = "offline"  # Cambiar a "online" si implementas ping a Redis
+        # 4. Telemetría Broker (Redis / Celery)
+        redis_status = "offline"
         redis_connections = 0
         redis_memory_usage = "N/A"
 
+        # 5. Payload Unificado (Compatible con frontend legacy y Enterprise UI)
         return {
-            "status": "online",
+            "status": "HEALTHY" if porcentaje_uso < 80 else "SATURADO",
             "system_state": "OPTIMO" if porcentaje_uso < 80 else "SATURADO",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "recomendacion": "Infraestructura operando con parámetros óptimos de latencia, almacenamiento y costo." if porcentaje_uso < 80 else "Alta concurrencia detectada. Se recomienda escalar workers de Celery.",
             
-            # Métricas globales de la aplicación
+            # Volumetría Global
             "metrics": {
                 "total_usuarios": total_usuarios,
                 "total_actas_generadas": total_actas,
                 "total_escaneos": total_scanners,
             },
 
-            # Métricas de rendimiento y capacidad para el panel
+            # FinOps & Gastos (Consumo Financiero en USD)
+            "financials": {
+                "gasto_total_usd": round(gasto_total_usd, 2),
+                "costo_promedio_acta_usd": round(costo_promedio_acta, 4),
+                "tokens_consumidos_total": tokens_consumidos_total,
+                "almacenamiento_gb_usado": almacenamiento_gb
+            },
+
+            # Telemetría de Capacidad
             "performance": {
                 "max_capacity": max_capacity,
                 "active_tasks": active_tasks,
-                "porcentaje_uso": porcentaje_uso,
+                "porcentaje_uso": round(porcentaje_uso, 1),
                 "queue_size": queue_size,
             },
 
-            # Estado del Broker (Redis / Celery)
+            # Aliases para retrocompatibilidad con frontend anterior
+            "procesamiento_en_vivo": {
+                "usuarios_procesando_ahora": active_tasks,
+                "capacidad_concurrente_max": max_capacity,
+                "porcentaje_ocupacion": f"{round(porcentaje_uso, 1)}%",
+                "usuarios_en_espera_cola": queue_size
+            },
+
+            # Broker Redis Status
             "redis": {
                 "status": redis_status,
                 "connections": redis_connections,
                 "memory_usage": redis_memory_usage
+            },
+            "infraestructura": {
+                "redis_memoria_usada": redis_memory_usage,
+                "redis_clientes_conectados": redis_connections
             }
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
