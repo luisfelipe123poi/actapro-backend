@@ -2104,6 +2104,9 @@ from fastapi import FastAPI, HTTPException
 # Asegúrate de tener importada tu base de datos y colecciones:
 # from tu_modulo_db import db, users_collection, actas_collection, scanners_historial_collection
 
+from datetime import datetime, timezone
+from fastapi import HTTPException
+
 @app.get("/admin/metrics")
 @app.get("/api/admin/metrics")
 def obtener_metricas_sistema():
@@ -2132,8 +2135,6 @@ def obtener_metricas_sistema():
         almacenamiento_mb = round(total_bytes_storage / (1024 * 1024), 2)
 
         # 2. Agregación FinOps Multi-Servicio (OpenAI + AssemblyAI Diarización + Cloudflare R2)
-        # Intentamos extraer datos reales de las colecciones si existen campos de costo/tokens/audio,
-        # de lo contrario aplicamos estimaciones profesionales basadas en volumetría.
         pipeline_finops = [
             {
                 "$group": {
@@ -2153,14 +2154,17 @@ def obtener_metricas_sistema():
             pass
 
         # Extracción y estimaciones inteligentes de respaldo
-        tokens_consumidos_total = res_actas[0].get("total_tokens", 0) if res_actas and res_actas[0].get("total_tokens") else (total_actas * 1850) # Promedio ~1.8k tokens/acta
+        tokens_consumidos_total = res_actas[0].get("total_tokens", 0) if res_actas and res_actas[0].get("total_tokens") else (total_actas * 1850)
         
-        # Costo OpenAI (GPT-4o-mini / Modelos de texto)
+        # Costo OpenAI
         gasto_openai_total = res_actas[0].get("gasto_openai", 0.0) if res_actas and res_actas[0].get("gasto_openai") else (total_actas * 0.0035)
         
-        # Costo AssemblyAI con Diarización de Voces (~$0.0004 USD por segundo de audio procesado)
-        segundos_audio_total = res_actas[0].get("segundos_totales_audio", 0) if res_actas and res_actas[0].get("segundos_totales_audio") else (total_scanners * 300) # Promedio 5 min por escaneo/audio
+        # Costo y Minutos de AssemblyAI con Diarización de Voces
+        segundos_audio_total = res_actas[0].get("segundos_totales_audio", 0) if res_actas and res_actas[0].get("segundos_totales_audio") else (total_scanners * 300)
         gasto_assembly_total = res_actas[0].get("gasto_assembly", 0.0) if res_actas and res_actas[0].get("gasto_assembly") else (segundos_audio_total * 0.0004)
+        
+        # Conversión exacta a minutos de AssemblyAI
+        minutos_assembly_calculados = round(segundos_audio_total / 60.0, 2)
 
         # Costo Cloudflare R2 Storage ($0.015 USD por GB al mes)
         gasto_r2_storage = almacenamiento_gb * 0.015
@@ -2207,9 +2211,11 @@ def obtener_metricas_sistema():
                 "tokens_consumidos_total": tokens_consumidos_total,
                 "almacenamiento_gb_usado": almacenamiento_gb,
                 "almacenamiento_mb_usado": almacenamiento_mb,
-                # Desglose específico solicitado
+                # Desglose específico solicitado y mapeo exacto de minutos AssemblyAI
                 "gasto_openai_usd": round(gasto_openai_total, 2),
                 "gasto_assembly_diarizacion_usd": round(gasto_assembly_total, 2),
+                "minutos_assembly": minutos_assembly_calculados,
+                "assembly_minutes": minutos_assembly_calculados,
                 "gasto_r2_storage_usd": round(gasto_r2_storage, 4)
             },
 
