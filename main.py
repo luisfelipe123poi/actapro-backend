@@ -891,12 +891,28 @@ import uuid
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status
+import boto3
+from botocore.config import Config
 
 # Importa tu tarea de celery
 from tasks import task_procesar_asamblea, celery_app
 
-TEMP_DIR = Path("temp_uploads")
-TEMP_DIR.mkdir(parents=True, exist_ok=True)
+# Configuración de Cloudflare R2 (S3 compatible)
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "archivos-temporales-actaprocore")
+R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "https://cdn.actaprocore.com")
+
+def get_r2_client():
+    return boto3.client(
+        's3',
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        config=Config(signature_version='s3v4'),
+        region_name='auto'
+    )
 
 @app.post("/procesar-asamblea")
 @app.post("/procesar")
@@ -906,21 +922,29 @@ async def procesar_asamblea(
     instrucciones: Optional[str] = Form(None),
     nombre_personalizado: Optional[str] = Form(None)
 ):
-    temp_audio_path = None
     try:
-        # Generar un nombre único para evitar colisiones en disco
+        # Generar un nombre único para el archivo en la nube
         file_extension = Path(file.filename).suffix
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
-        temp_audio_path = str(TEMP_DIR.resolve() / unique_filename)
+        unique_filename = f"audios/{uuid.uuid4()}{file_extension}"
+        
+        # Leer los bytes del archivo directamente de la petición
+        file_bytes = await file.read()
 
-        # Escritura por chunks para no colapsar la RAM
-        with open(temp_audio_path, "wb") as buffer:
-            while chunk := await file.read(1024 * 1024):  # Chunks de 1MB
-                buffer.write(chunk)
+        # Subir el archivo directamente a Cloudflare R2
+        s3 = get_r2_client()
+        s3.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=unique_filename,
+            Body=file_bytes,
+            ContentType=file.content_type or "audio/mpeg"
+        )
 
-        # Disparar la tarea en Celery pasando rutas absolutas seguras
+        # Construir la URL pública accesible por el Worker de Celery y AssemblyAI
+        audio_url = f"{R2_PUBLIC_URL.rstrip('/')}/{unique_filename}"
+
+        # Disparar la tarea en Celery pasando la URL web en lugar de una ruta local
         task = task_procesar_asamblea.delay(
-            temp_audio_path=temp_audio_path,
+            temp_audio_path=audio_url,
             email=email,
             instrucciones=instrucciones,
             nombre_personalizado=nombre_personalizado,
@@ -930,15 +954,13 @@ async def procesar_asamblea(
         return {
             "status": "pending",
             "task_id": task.id,
-            "message": "Procesamiento de asamblea iniciado correctamente."
+            "message": "Procesamiento de asamblea iniciado correctamente en la nube."
         }
 
     except Exception as e:
-        if temp_audio_path and os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error iniciando la tarea: {str(e)}"
+            detail=f"Error iniciando la tarea en la nube: {str(e)}"
         )
 
 @app.get("/api/actas/descargar/{acta_id}")
