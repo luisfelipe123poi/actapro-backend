@@ -30,17 +30,23 @@ scanners_historial_collection = db["scanners_historial"]
 PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). Tu objetivo es redactar un acta formal, jurídica y detallada a partir de la transcripción de la asamblea provista, asegurando un formato profesional en Markdown y cumplimiento legal estricto."""
 
 
+import hashlib
+import requests  # Asegúrate de tener requests instalado o usa boto3 para descargar si lo prefieres
+
 @celery_app.task(bind=True)
 def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones: str, nombre_personalizado: str, original_filename: str):
     try:
-        self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores..."})
+        self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores desde la nube..."})
 
-        if not os.path.exists(temp_audio_path):
-            raise Exception(f"El archivo de audio temporal no existe en la ruta: {temp_audio_path}")
-
-        with open(temp_audio_path, "rb") as f:
-            content_bytes = f.read()
-
+        # Como temp_audio_path ahora es una URL pública (https://cdn.actaprocore.com/...),
+        # descargamos temporalmente los bytes o dejamos que AssemblyAI lo consuma directamente.
+        
+        # Para el cálculo del hash y caché, descargamos los bytes desde la URL de R2
+        response_audio = requests.get(temp_audio_path)
+        if response_audio.status_code != 200:
+            raise Exception(f"No se pudo descargar el archivo de audio desde la nube: {temp_audio_path}")
+            
+        content_bytes = response_audio.content
         file_hash = hashlib.sha256(content_bytes).hexdigest()
         cached = transripciones_collection.find_one({"file_hash": file_hash})
 
@@ -49,6 +55,8 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
         else:
             config = aai.TranscriptionConfig(speaker_labels=True, language_code="es")
             transcriber = aai.Transcriber()
+            
+            # AssemblyAI acepta directamente la URL pública de Cloudflare R2
             transcript = transcriber.transcribe(temp_audio_path, config=config)
 
             if transcript.status == aai.TranscriptStatus.error:
@@ -118,9 +126,9 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
         raise Exception(f"Fallo en la tarea de procesamiento: {str(exc)}")
 
     finally:
-        # Limpieza obligatoria del archivo temporal de audio para no saturar el disco
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+        # Como temp_audio_path ya no es un archivo local, quitamos el os.remove(temp_audio_path).
+        # (Opcional: Si deseas borrar el archivo de Cloudflare R2 después de procesarlo, puedes hacerlo aquí con boto3).
+        pass
 
 
 @celery_app.task(bind=True)
