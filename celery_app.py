@@ -1,3 +1,8 @@
+# 1. PARCHEO DE MONKEY (DEBE IR EN LA PRIMERA LÍNEA ABSOLUTA)
+# Permite que Celery procese hasta 50+ tareas I/O en paralelo con gevent sin bloquear eventos.
+from gevent import monkey
+monkey.patch_all()
+
 import os
 from celery import Celery
 from dotenv import load_dotenv
@@ -21,4 +26,10 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
+    
+    # --- CONFIGURACIONES ADICIONALES PARA ALTA CONCURRENCIA Y RESILIENCIA ---
+    result_expires=3600,             # Las tareas guardadas en Redis expiran en 1 hora para liberar RAM
+    broker_connection_retry_on_startup=True, # Evita caídas al reiniciar la conexión con Redis en Render
+    worker_prefetch_multiplier=1,    # Garantiza una distribución equitativa de tareas entre corrutinas
+    task_acks_late=True,             # Si un worker se cae, la tarea no se pierde y regresa a la cola
 )
