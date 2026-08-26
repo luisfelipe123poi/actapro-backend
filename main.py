@@ -2098,39 +2098,28 @@ def subir_bytes_a_r2(file_bytes: bytes, filename: str, content_type: str) -> str
 
 
 
-@router.get("/admin/metrics")
+@app.get("/admin/metrics")
+@app.get("/api/admin/metrics")
 def obtener_metricas_sistema():
-    # 1. Inspeccionar tareas de Celery (Inspección rápida)
-    inspector = celery_app.control.inspect()
-    
-    activas = inspector.active() or {}
-    total_activas = sum(len(tasks) for tasks in activas.values())
-    
-    reservadas = inspector.reserved() or {}
-    total_en_cola = sum(len(tasks) for tasks in reservadas.values())
-
-    # 2. Reutilizar la conexión del pool a Redis
-    r = redis.Redis(connection_pool=pool)
-    redis_info = r.info()
-    
-    # 3. Determinar estado de salud
-    concurrencia_maxima = 25 
-    saturado = total_activas >= concurrencia_maxima or total_en_cola > 10
-
-    return {
-        "status": "WARNING" if saturado else "HEALTHY",
-        "procesamiento_en_vivo": {
-            "usuarios_procesando_ahora": total_activas,
-            "usuarios_en_espera_cola": total_en_cola,
-            "capacidad_concurrente_max": concurrencia_maxima,
-            "porcentaje_ocupacion": f"{(total_activas / concurrencia_maxima) * 100:.1f}%"
-        },
-        "infraestructura": {
-            "redis_memoria_usada": redis_info.get("used_memory_human"),
-            "redis_clientes_conectados": redis_info.get("connected_clients")
-        },
-        "recomendacion": "Ampliar RAM/Workers en Render" if saturado else "Sistema operando en rango óptimo"
-    }
+    """
+    Endpoint para proveer métricas del sistema al panel de infraestructura.
+    """
+    try:
+        total_usuarios = users_collection.count_documents({})
+        total_actas = actas_collection.count_documents({})
+        total_scanners = scanners_historial_collection.count_documents({})
+        
+        return {
+            "status": "online",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": {
+                "total_usuarios": total_usuarios,
+                "total_actas_generadas": total_actas,
+                "total_escaneos": total_scanners,
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
