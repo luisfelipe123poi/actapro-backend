@@ -2126,10 +2126,8 @@ def obtener_metricas_sistema():
         try:
             db_stats = db.command("dbStats")
         except Exception:
-            # Fallback seguro si el usuario de la BD no cuenta con privilegios de admin stats
             db_stats = {"dataSize": 0, "indexSize": 0, "storageSize": 0, "connections": {"current": 1, "available": 8190}}
 
-        # Cálculo exacto de almacenamiento físico en MB y GB (Datos + Índices)
         total_bytes_storage = db_stats.get("storageSize", 0) or (db_stats.get("dataSize", 0) + db_stats.get("indexSize", 0))
         almacenamiento_gb = round(total_bytes_storage / (1024 * 1024 * 1024), 3)
         almacenamiento_mb = round(total_bytes_storage / (1024 * 1024), 2)
@@ -2153,31 +2151,29 @@ def obtener_metricas_sistema():
         except Exception:
             pass
 
-        # Extracción y estimaciones inteligentes de respaldo
         tokens_consumidos_total = res_actas[0].get("total_tokens", 0) if res_actas and res_actas[0].get("total_tokens") else (total_actas * 1850)
-        
-        # Costo OpenAI
         gasto_openai_total = res_actas[0].get("gasto_openai", 0.0) if res_actas and res_actas[0].get("gasto_openai") else (total_actas * 0.0035)
         
-        # Costo y Minutos de AssemblyAI con Diarización de Voces
         segundos_audio_total = res_actas[0].get("segundos_totales_audio", 0) if res_actas and res_actas[0].get("segundos_totales_audio") else (total_scanners * 300)
         gasto_assembly_total = res_actas[0].get("gasto_assembly", 0.0) if res_actas and res_actas[0].get("gasto_assembly") else (segundos_audio_total * 0.0004)
         
-        # Conversión exacta a minutos de AssemblyAI
         minutos_assembly_calculados = round(segundos_audio_total / 60.0, 2)
-
-        # Costo Cloudflare R2 Storage ($0.015 USD por GB al mes)
         gasto_r2_storage = almacenamiento_gb * 0.015
 
-        # Gasto Global Acumulado Total en USD
         gasto_total_usd = gasto_openai_total + gasto_assembly_total + gasto_r2_storage
         costo_promedio_acta = (gasto_total_usd / total_actas) if total_actas > 0 else 0.0
 
-        # 3. Métricas de Capacidad y Procesamiento (Hilos y Celery)
-        max_capacity = 25       # Capacidad máxima concurrentemente soportada
-        active_tasks = 0        # Tareas Celery en ejecución activa
-        queue_size = 0          # Tareas aguardando slot en broker
+        # =========================================================================
+        # SALDOS / CRÉDITOS REALES DISPONIBLES EN PROVEEDORES 
+        # (Modifica estos valores oéctalos a tus variables de entorno / API externa si procede)
+        # =========================================================================
+        OPENAI_SALDO_REAL_USD = 18.50  # <-- Reemplaza con tu saldo real o consulta dinámica
+        ASSEMBLY_SALDO_REAL_USD = 48.80 # <-- Reemplaza con tu saldo real o consulta dinámica
 
+        # 3. Métricas de Capacidad y Procesamiento (Hilos y Celery)
+        max_capacity = 25
+        active_tasks = 0
+        queue_size = 0
         porcentaje_uso = (active_tasks / max_capacity * 100) if max_capacity > 0 else 0
 
         # 4. Telemetría Broker (Redis / Celery)
@@ -2197,29 +2193,30 @@ def obtener_metricas_sistema():
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "recomendacion": "Infraestructura operando con parámetros óptimos de latencia, almacenamiento y costo." if porcentaje_uso < 80 else "Alta concurrencia detectada. Se recomienda escalar workers de Celery.",
             
-            # Volumetría Global
             "metrics": {
                 "total_usuarios": total_usuarios,
                 "total_actas_generadas": total_actas,
                 "total_escaneos": total_scanners,
             },
 
-            # FinOps & Desglose Financiero Multi-Servicio (OpenAI, AssemblyAI Diarización, Cloudflare R2)
             "financials": {
                 "gasto_total_usd": round(gasto_total_usd, 2),
                 "costo_promedio_acta_usd": round(costo_promedio_acta, 4),
                 "tokens_consumidos_total": tokens_consumidos_total,
                 "almacenamiento_gb_usado": almacenamiento_gb,
                 "almacenamiento_mb_usado": almacenamiento_mb,
-                # Desglose específico solicitado y mapeo exacto de minutos AssemblyAI
                 "gasto_openai_usd": round(gasto_openai_total, 2),
                 "gasto_assembly_diarizacion_usd": round(gasto_assembly_total, 2),
                 "minutos_assembly": minutos_assembly_calculados,
                 "assembly_minutes": minutos_assembly_calculados,
-                "gasto_r2_storage_usd": round(gasto_r2_storage, 4)
+                "assembly_minutos_total": minutos_assembly_calculados,
+                "gasto_r2_storage_usd": round(gasto_r2_storage, 4),
+                
+                # CAMPOS NUEVOS CON LA INFORMACIÓN REAL DE SALDOS DISPONIBLES:
+                "openai_saldo_restante_usd": OPENAI_SALDO_REAL_USD,
+                "assembly_saldo_restante_usd": ASSEMBLY_SALDO_REAL_USD
             },
 
-            # Telemetría Avanzada de MongoDB (dbStats)
             "mongodb": {
                 "conexiones_activas": conexiones_activas_db,
                 "conexiones_disponibles": conexiones_disponibles_db,
@@ -2228,7 +2225,6 @@ def obtener_metricas_sistema():
                 "storage_size_bytes": total_bytes_storage
             },
 
-            # Telemetría de Capacidad
             "performance": {
                 "max_capacity": max_capacity,
                 "active_tasks": active_tasks,
@@ -2236,7 +2232,6 @@ def obtener_metricas_sistema():
                 "queue_size": queue_size,
             },
 
-            # Aliases de retrocompatibilidad con frontend
             "procesamiento_en_vivo": {
                 "usuarios_procesando_ahora": active_tasks,
                 "capacidad_concurrente_max": max_capacity,
@@ -2244,7 +2239,6 @@ def obtener_metricas_sistema():
                 "usuarios_en_espera_cola": queue_size
             },
 
-            # Broker Redis Status
             "redis": {
                 "status": redis_status,
                 "connections": redis_connections,
