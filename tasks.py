@@ -58,13 +58,18 @@ def get_r2_client():
 # ==========================================
 # 2. TAREA: PROCESAR ASAMBLEA (AUDIO -> DOCX)
 # ==========================================
-@celery_app.task(bind=True)
+@celery_app.task(
+    bind=True,
+    max_retries=5,
+    default_retry_delay=15,
+    autoretry_for=(requests.RequestException, openai.APIError, Exception)
+)
 def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones: str, nombre_personalizado: str, original_filename: str):
     try:
         self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores desde la nube..."})
 
         # Descarga temporal para hashing / caché
-        response_audio = requests.get(temp_audio_path)
+        response_audio = requests.get(temp_audio_path, timeout=60)
         if response_audio.status_code != 200:
             raise Exception(f"No se pudo descargar el archivo de audio desde la nube: {temp_audio_path}")
             
@@ -192,7 +197,12 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
 # ==========================================
 # 3. TAREA: ESCANEAR DOCUMENTO (OCR / HTML)
 # ==========================================
-@celery_app.task(bind=True)
+@celery_app.task(
+    bind=True,
+    max_retries=5,
+    default_retry_delay=10,
+    autoretry_for=(openai.APIError, Exception)
+)
 def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str = None):
     try:
         self.update_state(state="PROCESSING", meta={"status": "Validando permisos y leyendo archivo..."})
@@ -229,14 +239,15 @@ def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str
         else:
             if filename_lower.endswith(".pdf"):
                 doc = fitz.open(stream=file_bytes, filetype="pdf")
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    texto_pagina = page.get_text()
-                    
-                    if texto_pagina.strip():
-                        texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
-                
-                doc.close()
+                try:
+                    for page_num in range(len(doc)):
+                        page = doc[page_num]
+                        texto_pagina = page.get_text()
+                        
+                        if texto_pagina.strip():
+                            texto_extraido += f"\n--- Página {page_num + 1} ---\n" + texto_pagina
+                finally:
+                    doc.close()
                 
                 # Respaldo con pdfplumber si la lectura simple extrae poco texto
                 if len(texto_extraido.strip()) < 50:
@@ -256,7 +267,7 @@ def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str
 
             contenido_usuario = f"""Analyze the following text extracted from the document. Your output must be EXCLUSIVELY corporate semantic HTML ready to render directly in a browser or web container.
 - Replicate the original visual and section structure.
-- Use <h1>, <h2> for main and section titles.
+- Use <h1>, 2> for main and section titles.
 - Use <p> for paragraphs with Tailwind classes (e.g., text-slate-900, text-xs, leading-relaxed).
 - Use complete table tags (<table>, <thead>, <tbody>, <tr>, <th>, <td>) with borders and corporate classes if there is structured data.
 - If you detect references to charts, schemes, or diagrams, create them as a visual block with a dotted border.
