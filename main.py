@@ -2094,6 +2094,50 @@ def subir_bytes_a_r2(file_bytes: bytes, filename: str, content_type: str) -> str
     
     # Retornar la URL pública accesible por cualquier servicio (incluyendo Celery)
     return f"{R2_PUBLIC_URL.rstrip('/')}/{filename}"
+
+from fastapi import APIRouter
+from celery_app import celery_app
+import redis
+import os
+
+router = APIRouter()
+
+@router.get("/admin/metrics")
+def obtener_metricas_sistema():
+    # 1. Inspeccionar tareas de Celery
+    inspector = celery_app.control.inspect()
+    
+    # Tareas ejecutándose en este instante
+    activas = inspector.active() or {}
+    total_activas = sum(len(tasks) for tasks in activas.values())
+    
+    # Tareas reservadas/en cola esperando turno
+    reservadas = inspector.reserved() or {}
+    total_en_cola = sum(len(tasks) for tasks in reservadas.values())
+
+    # 2. Estado de Redis (Memoria y Conexiones)
+    r = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    redis_info = r.info()
+    
+    # 3. Determinar estado de salud
+    # Recordando que la concurrencia máxima configurada en Celery es 25-50
+    concurrencia_maxima = 25 
+    saturado = total_activas >= concurrencia_maxima or total_en_cola > 10
+
+    return {
+        "status": "WARNING" if saturado else "HEALTHY",
+        "procesamiento_en_vivo": {
+            "usuarios_procesando_ahora": total_activas,
+            "usuarios_en_espera_cola": total_en_cola,
+            "capacidad_concurrente_max": concurrencia_maxima,
+            "porcentaje_ocupacion": f"{(total_activas / concurrencia_maxima) * 100:.1f}%"
+        },
+        "infraestructura": {
+            "redis_memoria_usada": redis_info.get("used_memory_human"),
+            "redis_clientes_conectados": redis_info.get("connected_clients")
+        },
+        "recomendacion": "Ampliar RAM/Workers en Render" if saturado else "Sistema operando en rango óptimo"
+    }
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
