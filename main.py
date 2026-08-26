@@ -494,34 +494,60 @@ from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY, TA_CENTER
 
 from fastapi.responses import RedirectResponse
 
+# ==============================================================================
+# ENDPOINT DE DESCARGA DE ACTAS (Aislamiento por usuario + Redirección a R2/S3)
+# ==============================================================================
 @app.get("/api/actas/descargar/{acta_id}")
 async def descargar_acta(acta_id: str, email: str):
-    # 1. Buscar en MongoDB por ID o nombre asegurando el aislamiento del usuario
+    """
+    Permite descargar un acta por su ObjectId de MongoDB o por su nombre de archivo.
+    Garantiza aislamiento validando que pertenezca al email del usuario en sesión.
+    Si existe 'file_url', redirige directamente a la CDN en Cloudflare R2.
+    De lo contrario, construye dinámicamente el documento Word (.docx) como plan de respaldo.
+    """
     acta = None
-    try:
-        acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-    except Exception:
-        pass
-        
+    
+    # 1. Intentar buscar por ObjectId si la cadena es un BSON ID válido
+    if ObjectId.is_valid(acta_id):
+        try:
+            acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+        except Exception as e:
+            print(f"Error al consultar por ObjectId: {e}")
+
+    # 2. Si no se encontró por ID (o acta_id era el nombre del archivo), buscar por nombre_acta
     if not acta:
         acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
         
+    # 3. Si aún no existe, buscar por el campo 'acta_id' guardado como string (Compatibilidad)
     if not acta:
-        raise HTTPException(status_code=404, detail="Acta no encontrada.")
-        
-    # 2. Si ya guardamos el archivo en R2, redirigimos directamente a su URL pública (cdn.actaprocore.com)
+        acta = actas_collection.find_one({"acta_id": acta_id, "email": email})
+
+    # 4. Aislamiento / Validación: Si no existe o no coincide con el email
+    if not acta:
+        raise HTTPException(
+            status_code=404, 
+            detail="El acta solicitada no existe o no tienes permisos para acceder a ella."
+        )
+
+    # 5. Opción Principal: Redirección limpia a CDN / Cloudflare R2 si existe la URL pública
     file_url = acta.get("file_url")
     if file_url:
         return RedirectResponse(url=file_url, status_code=303)
 
-    # 3. Plan de respaldo (por si el acta es antigua y no tiene file_url en la BD)
-    contenido_texto = acta.get("contenido", "")
-    nombre_archivo = acta.get("nombre_acta", "Acta_Asamblea.docx")
+    # 6. Plan de Respaldo: Generación al vuelo de documento .docx si el acta es antigua sin file_url
+    contenido_texto = acta.get("contenido", "") or acta.get("transcripcion", "")
+    nombre_archivo = acta.get("nombre_acta") or f"Acta_Asamblea_{acta_id[:8]}.docx"
     
-    doc = Document()
-    titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
-    titulo_principal.alignment = 1
+    if not nombre_archivo.endswith(".docx"):
+        nombre_archivo += ".docx"
 
+    doc = Document()
+    
+    # Encabezado principal del documento
+    titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
+    titulo_principal.alignment = 1 # Centrado
+
+    # Parser simple de Markdown a Word (Encabezados y Negritas)
     for linea in contenido_texto.split("\n"):
         linea_clean = linea.strip()
         if not linea_clean:
@@ -538,15 +564,17 @@ async def descargar_acta(acta_id: str, email: str):
                 for i, parte in enumerate(partes):
                     if parte:
                         run = p.add_run(parte)
-                        if i % 2 == 1:
+                        if i % 2 == 1: # Índice impar = Texto en negrita
                             run.bold = True
             else:
                 p.add_run(linea_clean)
 
+    # Guardar documento en memoria
     doc_io = BytesIO()
     doc.save(doc_io)
     doc_io.seek(0)
 
+    # Retorno directo como Stream de Bytes Word
     return Response(
         content=doc_io.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
