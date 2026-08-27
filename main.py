@@ -2208,24 +2208,29 @@ from typing import Optional
 class SoporteRequest(BaseModel):
     tipoConsulta: str
     mensaje: str
-    email: Optional[str] = None
+    nombre: Optional[str] = "Anónimo"
+    email: Optional[str] = "No registrado"
+    telefono: Optional[str] = "No proporcionado"
 
 @app.post("/api/soporte/faqs")
 def guardar_consulta_soporte(data: SoporteRequest):
     try:
-        # Guardar en MongoDB
+        # Guardar en MongoDB incluyendo nombre y teléfono
         registro = {
             "tipo": data.tipoConsulta,
             "mensaje": data.mensaje,
-            "email": data.email or "Anónimo",
+            "nombre": data.nombre or "Anónimo",
+            "email": data.email or "No registrado",
+            "telefono": data.telefono or "No proporcionado",
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "createdAt": datetime.now(timezone.utc)
         }
         soporte_collection.insert_one(registro)
 
-        # Respuesta estándar que espera tu función JS del chat
+        # Respuesta mejorada al usuario
+        nombre_usuario = data.nombre if data.nombre and data.nombre != "Anónimo" else "Estimado usuario"
         return {
-            "respuesta": "¡Hemos recibido tu mensaje de soporte/feedback correctamente! Nuestro equipo lo revisará a la brevedad.",
+            "respuesta": f"Gracias {nombre_usuario} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
             "videoUrl": None
         }
     except Exception as e:
