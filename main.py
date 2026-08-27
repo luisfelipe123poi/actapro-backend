@@ -86,6 +86,7 @@ users_collection = db["users"]
 actas_collection = db["actas_historial"]
 transripciones_collection = db["transripciones_cache"]
 scanners_historial_collection = db["scanners_historial"]
+soporte_collection = db["soporte_feedback"]  # <-- Nueva colección para almacenar el soporte y feedback de los usuarios
 
 # Configurar índice TTL para caché de transcripciones
 try:
@@ -2199,6 +2200,34 @@ def obtener_metricas_sistema():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class SoporteRequest(BaseModel):
+    tipoConsulta: str
+    mensaje: str
+    nombre: Optional[str] = "Anónimo"
+    email: Optional[str] = "No registrado"
+    telefono: Optional[str] = "No proporcionado"
+
+@app.post("/api/soporte/faqs")
+def guardar_consulta_soporte(data: SoporteRequest):
+    try:
+        registro = {
+            "tipo": data.tipoConsulta,
+            "nombre": data.nombre,
+            "email": data.email,
+            "telefono": data.telefono,
+            "mensaje": data.mensaje,
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "createdAt": datetime.now(timezone.utc)
+        }
+        soporte_collection.insert_one(registro)
+
+        return {
+            "respuesta": f"¡Gracias {data.nombre}! Hemos registrado tu solicitud de soporte correctamente. Te contactaremos al correo {data.email}.",
+            "videoUrl": None
+        }
+    except Exception as e:
+        return {"error": str(e)}, 500
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
