@@ -2201,31 +2201,54 @@ def obtener_metricas_sistema():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+from pydantic import BaseModel
+from typing import Optional
+
 class SoporteRequest(BaseModel):
     tipoConsulta: str
     mensaje: str
-    nombre: Optional[str] = "Anónimo"
-    email: Optional[str] = "No registrado"
-    telefono: Optional[str] = "No proporcionado"
+    email: Optional[str] = None
 
 @app.post("/api/soporte/faqs")
 def guardar_consulta_soporte(data: SoporteRequest):
     try:
+        # Guardar en MongoDB
         registro = {
             "tipo": data.tipoConsulta,
-            "nombre": data.nombre,
-            "email": data.email,
-            "telefono": data.telefono,
             "mensaje": data.mensaje,
+            "email": data.email or "Anónimo",
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "createdAt": datetime.now(timezone.utc)
         }
         soporte_collection.insert_one(registro)
 
+        # Respuesta estándar que espera tu función JS del chat
         return {
-            "respuesta": f"¡Gracias {data.nombre}! Hemos registrado tu solicitud de soporte correctamente. Te contactaremos al correo {data.email}.",
+            "respuesta": "¡Hemos recibido tu mensaje de soporte/feedback correctamente! Nuestro equipo lo revisará a la brevedad.",
             "videoUrl": None
         }
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@app.get("/api/soporte/mensajes")
+def obtener_mensajes_soporte():
+    try:
+        mensajes = list(soporte_collection.find().sort("createdAt", -1).limit(100))
+        for m in mensajes:
+            m["_id"] = str(m["_id"])
+            m.pop("createdAt", None)
+        return mensajes
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@app.delete("/api/soporte/mensajes/{msg_id}")
+def eliminar_mensaje_soporte(msg_id: str):
+    from bson import ObjectId
+    try:
+        result = soporte_collection.delete_one({"_id": ObjectId(msg_id)})
+        if result.deleted_count > 0:
+            return {"status": "success"}
+        return {"error": "Mensaje no encontrado"}, 404
     except Exception as e:
         return {"error": str(e)}, 500
     
