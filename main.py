@@ -2215,7 +2215,6 @@ class SoporteRequest(BaseModel):
 @app.post("/api/soporte/faqs")
 def guardar_consulta_soporte(data: SoporteRequest):
     try:
-        # Guardar en MongoDB incluyendo nombre y teléfono
         registro = {
             "tipo": data.tipoConsulta,
             "mensaje": data.mensaje,
@@ -2225,15 +2224,18 @@ def guardar_consulta_soporte(data: SoporteRequest):
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "createdAt": datetime.now(timezone.utc)
         }
-        soporte_collection.insert_one(registro)
+        
+        # Intentar insertar en MongoDB
+        resultado = soporte_collection.insert_one(registro)
+        print(f"DEBUG: Documento insertado con ID: {resultado.inserted_id}")
 
-        # Respuesta mejorada al usuario
         nombre_usuario = data.nombre if data.nombre and data.nombre != "Anónimo" else "Estimado usuario"
         return {
             "respuesta": f"Gracias {nombre_usuario} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
             "videoUrl": None
         }
     except Exception as e:
+        print(f"ERROR AL GUARDAR SOPORTE: {str(e)}")
         return {"error": str(e)}, 500
 
 @app.get("/api/soporte/mensajes")
