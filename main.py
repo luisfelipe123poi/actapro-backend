@@ -1199,8 +1199,13 @@ async def obtener_historial_actas(email: str):
 
 from fastapi.responses import HTMLResponse
 
+from io import BytesIO
+from fastapi import Response
+from docx import Document
+from bson import ObjectId
+
 @app.get("/api/scanners/descargar/{scanner_id}")
-async def descargar_scanner(scanner_id: str, email: str):
+async def descargar_scanner_docx(scanner_id: str, email: str):
     try:
         # Intentar buscar por ID de objeto (ObjectId)
         filtro = {"_id": ObjectId(scanner_id), "email": email}
@@ -1213,15 +1218,53 @@ async def descargar_scanner(scanner_id: str, email: str):
         if not registro:
             raise HTTPException(status_code=404, detail="Archivo no encontrado.")
 
-        nombre_archivo = f"{registro['nombre'].replace('.pdf', '').replace('.jpg', '')}.html"
-        contenido_html = registro['contenido']
+        # 1. Crear el documento Word en memoria
+        doc = Document()
+        
+        # Título o nombre original del archivo escaneado
+        doc.add_heading(registro.get('nombre', 'Documento Escaneado'), level=1)
+        
+        # Contenido (si el contenido guardado tiene etiquetas HTML, puedes pasarlo plano 
+        # o procesarlo; aquí asumimos que insertas el texto o el contenido)
+        contenido = registro.get('contenido', '')
+        
+        # Limpiamos etiquetas HTML básicas si las hay para que en Word quede texto limpio
+        from html.parser import HTMLParser
+        class HTMLFilter(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.text = []
+            def handle_data(self, data):
+                self.text.append(data)
 
-        # Retornar como descarga forzada
-        return HTMLResponse(
-            content=contenido_html,
-            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+        f = HTMLFilter()
+        f.feed(contenido)
+        texto_limpio = "".join(f.text)
+
+        doc.add_paragraph(texto_limpio)
+
+        # 2. Guardar en un buffer de memoria BytesIO
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+
+        # 3. Definir el nombre del archivo con extensión .docx
+        nombre_base = registro.get('nombre', 'documento').replace('.pdf', '').replace('.jpg', '').replace('.png', '')
+        nombre_archivo = f"{nombre_base}.docx"
+
+        # 4. Retornar como archivo binario descargable (.docx)
+        headers = {
+            'Content-Disposition': f'attachment; filename="{nombre_archivo}"'
+        }
+        return Response(
+            content=buffer.getvalue(),
+            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            headers=headers
         )
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 from reportlab.lib.pagesizes import letter
