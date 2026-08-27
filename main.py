@@ -1390,26 +1390,7 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
 
 
-# --- Ruta 1: FAQs Preestablecidas con Cloudinary ---
-@app.post("/api/soporte/faqs")
-async def soporte_faqs(req: ConsultaFAQRequest):
-    faqs_data = {
-        "audio": {
-            "respuesta": "Para transcribir un audio, ve a '+ Transcribe audios', sube tu archivo en formato .mp3 o .wav y haz clic en 'Generar Acta'.",
-            "videoUrl": "https://res.cloudinary.com/iuu7h8rj/video/upload/v1787281142/transcripcion_por_audio.mp4"
-        },
-        "scanner": {
-            "respuesta": "Para usar el escáner de documentos, dirígete al '+ Escanea y transcribe doc.', sube tu archivo en PDF o imagen clara.",
-            "videoUrl": "https://res.cloudinary.com/iuu7h8rj/video/upload/v1787281146/scanner_de_documento.mp4"
-        }
-    }
-    
-    resultado = faqs_data.get(req.tipoConsulta, {
-        "respuesta": "Gracias por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
-        
-    })
 
-    return resultado
 
 # --- Ruta 2: Verificación de Plan Preestablecida con Video ---
 @app.post("/api/soporte/verificar-plan")
@@ -2218,10 +2199,28 @@ class SoporteRequest(BaseModel):
     telefono: Optional[str] = "No proporcionado"
 
 @app.post("/api/soporte/faqs")
-def guardar_consulta_soporte(data: SoporteRequest):
+async def manejar_soporte_y_faqs(data: SoporteRequest):
     print("--------------------------------------------------")
     print("🔥 ENTRÓ AL ENDPOINT POST /api/soporte/faqs")
-    print("🔥 Datos crudos recibidos:", data)
+    print("🔥 Datos recibidos:", data)
+    
+    # 1. Si es una consulta de FAQ preestablecida (audio o scanner)
+    faqs_data = {
+        "audio": {
+            "respuesta": "Para transcribir un audio, ve a '+ Transcribe audios', sube tu archivo en formato .mp3 o .wav y haz clic en 'Generar Acta'.",
+            "videoUrl": "https://res.cloudinary.com/iuu7h8rj/video/upload/v1787281142/transcripcion_por_audio.mp4"
+        },
+        "scanner": {
+            "respuesta": "Para usar el escáner de documentos, dirígete al '+ Escanea y transcribe doc.', sube tu archivo en PDF o imagen clara.",
+            "videoUrl": "https://res.cloudinary.com/iuu7h8rj/video/upload/v1787281146/scanner_de_documento.mp4"
+        }
+    }
+    
+    if data.tipoConsulta in faqs_data:
+        print("🔥 Respondiendo con FAQ preestablecida de Cloudinary")
+        return faqs_data[data.tipoConsulta]
+
+    # 2. Si es soporte o feedback personalizado, guardamos en MongoDB
     try:
         registro = {
             "tipo": data.tipoConsulta,
@@ -2232,13 +2231,14 @@ def guardar_consulta_soporte(data: SoporteRequest):
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "createdAt": datetime.now(timezone.utc)
         }
-        print("🔥 Diccionario a insertar:", registro)
+        print("🔥 Diccionario a insertar en Mongo:", registro)
         
         resultado = soporte_collection.insert_one(registro)
         print(f"✅ ¡ÉXITO TOTAL! Documento insertado con ID: {resultado.inserted_id}")
 
+        nombre_usuario = data.nombre if data.nombre and data.nombre != "Anónimo" else "Estimado usuario"
         return {
-            "respuesta": f"Gracias {data.nombre or 'Estimado usuario'} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
+            "respuesta": f"Gracias {nombre_usuario} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
             "videoUrl": None
         }
     except Exception as e:
@@ -2247,7 +2247,6 @@ def guardar_consulta_soporte(data: SoporteRequest):
         traceback.print_exc()
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/api/soporte/mensajes")
 def obtener_mensajes_soporte():
     print("--------------------------------------------------")
