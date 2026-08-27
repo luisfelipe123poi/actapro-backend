@@ -87,7 +87,7 @@ users_collection = db["users"]
 actas_collection = db["actas_historial"]
 transripciones_collection = db["transripciones_cache"]
 scanners_historial_collection = db["scanners_historial"]
-soporte_collection = db["soporte_feedback"]  # <-- Nueva colección para almacenar el soporte y feedback de los usuarios
+soporte_collection = db["actabot_db"]  # <-- Nueva colección para almacenar el soporte y feedback de los usuarios
 
 # Configurar índice TTL para caché de transcripciones
 try:
