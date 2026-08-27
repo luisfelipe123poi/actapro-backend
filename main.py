@@ -839,7 +839,7 @@ from fastapi.responses import RedirectResponse
 async def descargar_acta(acta_id: str, email: str):
     """
     Endpoint seguro para descargar actas con aislamiento por usuario.
-    Redirige a Cloudflare R2 si existe URL o genera el Word al vuelo como respaldo.
+    Fuerza la generación al vuelo para garantizar que se aplique el nuevo formato.
     """
     acta = None
     
@@ -865,12 +865,12 @@ async def descargar_acta(acta_id: str, email: str):
             detail="El acta solicitada no existe o no tienes permisos para acceder a ella."
         )
         
-    # 5. Opción Principal: Redirección directa a Cloudflare R2 (CDN)
-    file_url = acta.get("file_url")
-    if file_url:
-        return RedirectResponse(url=file_url, status_code=303)
+    # [OPCIONAL] Si deseas mantener R2 solo cuando la URL sea estrictamente válida y no esté vacía:
+    # file_url = acta.get("file_url")
+    # if file_url and file_url.startswith("http"):
+    #     return RedirectResponse(url=file_url, status_code=303)
 
-    # 6. Plan de Respaldo: Generación dinámica del documento Word (.docx)
+    # 6. Generación Dinámica Forzada del documento Word (.docx)
     contenido_texto = acta.get("contenido", "") or acta.get("transcripcion", "") or acta.get("texto", "")
     nombre_archivo = acta.get("nombre_acta") or f"Acta_Asamblea_{acta_id[:8]}.docx"
     
@@ -904,7 +904,7 @@ async def descargar_acta(acta_id: str, email: str):
     run_sub.font.italic = True
     run_sub.font.color.rgb = RGBColor(100, 116, 139)
 
-    # Si el contenido contiene etiquetas HTML, usa el parser correspondiente; si no, procesa Markdown/Texto plano
+    # Procesamiento del contenido según formato (HTML o Markdown)
     if "<" in contenido_texto and ">" in contenido_texto and 'parse_html_to_docx' in globals():
         parse_html_to_docx(contenido_texto, doc)
     else:
