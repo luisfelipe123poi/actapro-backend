@@ -1465,74 +1465,59 @@ def parse_html_to_reportlab_story(html_content, story, styles):
                 story.append(Paragraph(li_text, body_style))
 
 
-from fastapi.responses import StreamingResponse
-
-# --- ENDPOINT DESCARGA WORD (.docx) ---
-@app.get("/api/scanners/descargar/{scanner_id}")
-async def descargar_scanner_docx(scanner_id: str, email: str):
-    try:
-        filtro = {"_id": ObjectId(scanner_id), "email": email}
-        registro = scanners_historial_collection.find_one(filtro)
-        if not registro:
-            registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
-        if not registro:
-            raise HTTPException(status_code=404, detail="Archivo no encontrado.")
-
-        doc = Document()
-        # ... (configuraciones de márgenes y estilos que ya tienes) ...
-        
-        contenido_html = registro.get('contenido', '')
-        parse_html_to_docx(contenido_html, doc)
-
-        buffer = BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-
-        nombre_base = registro.get('nombre', 'documento').replace('.pdf', '').replace('.jpg', '').replace('.png', '')
-        nombre_archivo = f"{nombre_base}_ActaProCore.docx"
-
-        return StreamingResponse(
-            buffer,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# --- ENDPOINT DESCARGA PDF ---
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     try:
         filtro = {"_id": ObjectId(scanner_id), "email": email}
         registro = scanners_historial_collection.find_one(filtro)
+        
         if not registro:
             registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
+            
         if not registro:
-            raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+            raise HTTPException(status_code=404, detail="Archivo no encontrado en la base de datos.")
 
-        nombre_base = registro.get("nombre", "Escaneo_IA").replace(".pdf", "").replace(".jpg", "").replace(".png", "")
+        nombre_base = str(registro.get("nombre", "Escaneo_IA")).replace(".pdf", "").replace(".jpg", "").replace(".png", "")
         nombre_archivo_pdf = f"{nombre_base}.pdf"
+        
+        # --- VERIFICACIÓN DE CONTENIDO ---
         contenido_html = registro.get("contenido", "")
+        print(f"DEBUG - Contenido recuperado para {scanner_id}: {repr(contenido_html[:100])}")
 
         pdf_buffer = BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
+        doc = SimpleDocTemplate(
+            pdf_buffer, 
+            pagesize=letter, 
+            rightMargin=54, 
+            leftMargin=54, 
+            topMargin=54, 
+            bottomMargin=54
+        )
+        
         story = []
         styles = getSampleStyleSheet()
         
-        parse_html_to_reportlab_story(contenido_html, story, styles)
+        # Parsear contenido
+        parse_html_to_reportlab_safe(contenido_html, story, styles)
+
+        # PRUEBA DE EMERGENCIA: Si el story sigue vacío, forzamos texto para que no quede en 0 páginas
+        if not story:
+            body_style = styles['Normal']
+            story.append(Paragraph("Aviso: El contenido de este registro estaba vacío o no pudo ser interpretado.", body_style))
+            story.append(Paragraph(f"Contenido raw: {str(contenido_html)[:300]}", body_style))
 
         doc.build(story)
-        pdf_buffer.seek(0)
-        
-        return StreamingResponse(
-            pdf_buffer,
+        pdf_bytes = pdf_buffer.getvalue()
+        pdf_buffer.close()
+
+        return Response(
+            content=pdf_bytes,
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{nombre_archivo_pdf}"'}
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
-
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error interno generando PDF: {str(e)}")
 
 
 
