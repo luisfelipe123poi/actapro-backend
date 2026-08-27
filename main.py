@@ -49,6 +49,7 @@ origins = [
     "https://admin-licencias.actaprocore.com",
     "https://dashboard-apc.actaprocore.com", 
     "https://panel-infraestructura.actaprocore.com",
+    "https://sptc-soporte.actaprocore.com",
     "http://localhost",
     "http://localhost:3000",
     "http://localhost:5173",
