@@ -2219,17 +2219,10 @@ class SoporteRequest(BaseModel):
 
 @app.post("/api/soporte/faqs")
 def guardar_consulta_soporte(data: SoporteRequest):
+    print("--------------------------------------------------")
+    print("🔥 ENTRÓ AL ENDPOINT POST /api/soporte/faqs")
+    print("🔥 Datos crudos recibidos:", data)
     try:
-        print("DEBUG: Entró al endpoint /api/soporte/faqs")
-        
-        # Manejo seguro para obtener los datos del modelo pydantic
-        try:
-            datos_dict = data.model_dump()
-        except AttributeError:
-            datos_dict = data.dict()
-            
-        print("Datos recibidos:", datos_dict)
-        
         registro = {
             "tipo": data.tipoConsulta,
             "mensaje": data.mensaje,
@@ -2239,31 +2232,37 @@ def guardar_consulta_soporte(data: SoporteRequest):
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "createdAt": datetime.now(timezone.utc)
         }
+        print("🔥 Diccionario a insertar:", registro)
         
-        # Esta línea crea físicamente la colección 'soporte_feedback' en MongoDB si no existe
         resultado = soporte_collection.insert_one(registro)
-        print(f"DEBUG: ¡ÉXITO! Insertado en 'soporte_feedback' con ID: {resultado.inserted_id}")
+        print(f"✅ ¡ÉXITO TOTAL! Documento insertado con ID: {resultado.inserted_id}")
 
-        nombre_usuario = data.nombre if data.nombre and data.nombre != "Anónimo" else "Estimado usuario"
         return {
-            "respuesta": f"Gracias {nombre_usuario} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
+            "respuesta": f"Gracias {data.nombre or 'Estimado usuario'} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
             "videoUrl": None
         }
     except Exception as e:
-        print(f"DEBUG ERROR: Falló la inserción en Mongo: {str(e)}")
+        import traceback
+        print("❌ EXCEPCIÓN CRÍTICA EN MONGO:")
+        traceback.print_exc()
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
-        
+
 @app.get("/api/soporte/mensajes")
 def obtener_mensajes_soporte():
+    print("--------------------------------------------------")
+    print("🔥 ENTRÓ AL ENDPOINT GET /api/soporte/mensajes")
     try:
         mensajes = list(soporte_collection.find().sort("createdAt", -1).limit(100))
+        print(f"🔥 Mensajes encontrados en la colección: {len(mensajes)}")
         for m in mensajes:
             m["_id"] = str(m["_id"])
             m.pop("createdAt", None)
         return mensajes
     except Exception as e:
-        print(f"DEBUG ERROR GET: {str(e)}")
+        import traceback
+        print("❌ EXCEPCIÓN CRÍTICA EN GET MENSAJES:")
+        traceback.print_exc()
         return []
 
 @app.delete("/api/soporte/mensajes/{msg_id}")
