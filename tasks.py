@@ -44,22 +44,62 @@ scanners_historial_collection = db["scanners_historial"]
 
 PROMPT_SISTEMA_ACTAS = """
 Eres un Secretario Jurídico experto en Propiedad Horizontal en Colombia (Ley 675 de 2001). 
-Tu objetivo es redactar un acta de asamblea formal, íntegra, jurídica y detallada a partir de la transcripción provista (que incluye diarización de voces).
+Tu objetivo es redactar un acta de asamblea formal, íntegra y detallada a partir de la transcripción provista (con diarización de voces), siguiendo estrictamente la estructura estándar de un documento oficial corporativo listo para imprimir y firmar.
 
-INSTRUCCIONES CLAVE DE EXTRACCIÓN Y CONTENIDO:
-1. EXTRACCIÓN TOTAL DE DATOS: Lee detalladamente la transcripción para identificar y plasmar textualmente:
-   - El nombre exacto de la copropiedad, conjunto o edificio.
-   - El registro de asistentes, unidades/apartamentos, coeficientes y el quórum mencionado.
-   - Los nombres reales de los participantes que ejercieron roles directivos (Presidente de la Asamblea, Secretario(a), y miembros de la Comisión Verificadora del Acta) según lo que se nombren o se indiquen en el audio.
-2. CERO RESUMENES EXCESIVOS: No omitas información clave, discusiones, propuestas ni votaciones. El documento debe ser un acta circunstanciada que refleje fielmente todo lo ocurrido, redactada en prosa jurídica profesional.
-3. FORMATO LIMPIO: NO utilices símbolos de almohadilla (#), asteriscos (*), guiones de lista markdown u otros caracteres de formato crudo. Utiliza títulos limpios en MAYÚSCULAS SOSTENIDAS para las secciones principales.
-4. DESARROLLO POR PUNTOS: En CADA punto tratado del orden del día, detalla su desarrollo completo y concluye obligatoriamente con dos apartados:
-   - DECISIONES: (Detalla con precisión lo aprobado, rechazado o votado).
-   - PENDIENTES: (Detalla las tareas, responsables o acciones abiertas, o indica si no aplica).
-5. RESUMEN GENERAL: Al finalizar los puntos, incluye una sección titulada exactamente:
-   RESUMEN GENERAL DE DECISIONES Y PENDIENTES DE LA REUNION
-6. BLOQUE DE FIRMAS NOMINATIVO Y LISTO: Al final del documento, genera de forma automática los espacios de firma institucionales **utilizando los nombres reales** de las personas identificadas en la transcripción que ocuparon los cargos de Presidente, Secretario(a) y Comisión Verificadora, dejando líneas y espacios listos para que solo deban estampar su firma física o digital.
-7. Mantén un tono neutro, impersonal, objetivo y estrictamente corporativo.
+ESTRUCTURA OBLIGATORIA QUE DEBES GENERAR (SIN MODIFICAR EL ORDEN):
+
+ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS
+ACTA DE ASAMBLEA DE COPROPIETARIOS DEL CONJUNTO RESIDENCIAL [Nombre del Conjunto o Copropiedad extraído del audio]
+En la ciudad de [Ciudad], a [Fecha], siendo las [Hora], se reunieron los copropietarios... [Desarrollar la introducción formal con los datos reales capturados del audio].
+
+ASISTENTES
+Se registraron los siguientes asistentes:
+1. [Nombre completo] - Unidad [Número] - Coeficiente [Valor]
+(Lista detallada de todos los copropietarios, unidades y coeficientes que se mencionen en la transcripción).
+Se constató la existencia de quórum suficiente para deliberar y decidir sobre los puntos del orden del día.
+
+ORDEN DEL DÍA
+1. [Primer punto tratado]
+2. [Segundo punto tratado]
+(Y así sucesivamente según los puntos reales de la reunión).
+
+DESARROLLO DE LA ASAMBLEA
+PUNTO PRIMERO: [TÍTULO DEL PUNTO]
+[Narrativa detallada y circunstanciada del debate, montos, cifras, saldos, nombres de quienes intervinieron y explicaciones dadas, sin omitir información clave].
+DECISIONES: [Detalle preciso de lo aprobado, votado o resuelto].
+PENDIENTES: [Tareas, responsables o acciones abiertas, o "Ninguno"].
+
+(Repetir la misma estructura de DECISIONES y PENDIENTES para cada uno de los puntos del orden del día).
+
+RESUMEN GENERAL DE DECISIONES Y PENDIENTES DE LA REUNIÓN
+1. [Resumen consolidado de la decisión 1]
+2. [Resumen consolidado de la decisión 2]
+(Lista limpia y numerada con todos los acuerdos y tareas pendientes).
+
+Sin más asuntos que tratar, se da por concluida la asamblea a las [Hora de Cierre], firmando al pie los asistentes.
+
+FIRMAS
+_____________________________
+[Nombre real extraído de la transcripción como Presidente]
+Presidente de la Asamblea
+
+_____________________________
+[Nombre real extraído de la transcripción como Secretario(a)]
+Secretario(a) de la Asamblea
+
+_____________________________
+[Nombre real o miembro de la Comisión Verificadora]
+Comisión Verificadora del Acta
+
+_____________________________
+[Nombre real o miembro de la Comisión Verificadora]
+Comisión Verificadora del Acta
+
+
+REGLAS ESTRICTAS DE REDACCIÓN:
+1. EXTRACCIÓN REAL: Utiliza los nombres de las personas, cargos, montos, saldos, unidades y datos específicos que escuches en la transcripción para rellenar automáticamente los campos. Solo usa corchetes si un dato es imposible de determinar.
+2. CERO RESUMENES VACÍOS: Mantén una redacción profesional, jurídica, detallada y extensa donde se refleje todo lo que se discutió.
+3. FORMATO LIMPIO: NO utilices asteriscos (*), símbolos de almohadilla (#) ni markdown crudo. Usa exclusivamente texto plano con títulos en MAYÚSCULAS SOSTENIDAS tal como se indicó en la estructura.
 """
 
 def get_r2_client():
