@@ -1465,57 +1465,49 @@ def parse_html_to_reportlab_story(html_content, story, styles):
                 story.append(Paragraph(li_text, body_style))
 
 
-@app.get("/api/actas/descargar-pdf/{acta_id}")
-async def descargar_acta_pdf(acta_id: str, email: str):
-    acta = None
+from fastapi.responses import StreamingResponse
+
+# --- ENDPOINT DESCARGA WORD (.docx) ---
+@app.get("/api/scanners/descargar/{scanner_id}")
+async def descargar_scanner_docx(scanner_id: str, email: str):
     try:
-        acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
-    except Exception:
-        pass
-        
-    if not acta:
-        acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
-        
-    if not acta:
-        raise HTTPException(status_code=404, detail="Acta no encontrada.")
-        
-    contenido_texto = acta.get("contenido", "")
-    nombre_base = acta.get("nombre_acta", "Acta_Asamblea").replace(".docx", "").replace(".pdf", "")
-    nombre_archivo_pdf = f"{nombre_base}.pdf"
-    
-    pdf_buffer = io.BytesIO()
-    doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
-    story = []
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'ActaTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=13, leading=16, spaceAfter=15
-    )
-    
-    story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
-    story.append(Spacer(1, 10))
-    
-    parse_html_to_reportlab_story(contenido_texto, story, styles)
+        filtro = {"_id": ObjectId(scanner_id), "email": email}
+        registro = scanners_historial_collection.find_one(filtro)
+        if not registro:
+            registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
+        if not registro:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado.")
 
-    doc.build(story)
-    pdf_buffer.seek(0)
-    
-    return Response(
-        content=pdf_buffer.getvalue(),
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo_pdf}"'}
-    )
+        doc = Document()
+        # ... (configuraciones de márgenes y estilos que ya tienes) ...
+        
+        contenido_html = registro.get('contenido', '')
+        parse_html_to_docx(contenido_html, doc)
+
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+
+        nombre_base = registro.get('nombre', 'documento').replace('.pdf', '').replace('.jpg', '').replace('.png', '')
+        nombre_archivo = f"{nombre_base}_ActaProCore.docx"
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- ENDPOINT DESCARGA PDF ---
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     try:
         filtro = {"_id": ObjectId(scanner_id), "email": email}
         registro = scanners_historial_collection.find_one(filtro)
-        
         if not registro:
             registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
-            
         if not registro:
             raise HTTPException(status_code=404, detail="Archivo no encontrado.")
 
@@ -1523,12 +1515,8 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = registro.get("contenido", "")
 
-        pdf_buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            pdf_buffer, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54,
-            title=nombre_base, author="Sistema de Escaneo IA"
-        )
-        
+        pdf_buffer = BytesIO()
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
         story = []
         styles = getSampleStyleSheet()
         
@@ -1537,10 +1525,10 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         doc.build(story)
         pdf_buffer.seek(0)
         
-        return Response(
-            content=pdf_buffer.getvalue(),
+        return StreamingResponse(
+            pdf_buffer,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
+            headers={"Content-Disposition": f'attachment; filename="{nombre_archivo_pdf}"'}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
