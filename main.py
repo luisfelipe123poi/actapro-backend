@@ -1209,7 +1209,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from bson import ObjectId
 from datetime import datetime
-from bs4 import BeautifulSoup
+from html.parser import HTMLParser
 
 def set_cell_background(cell, fill_color):
     tcPr = cell._tc.get_or_add_tcPr()
@@ -1219,106 +1219,21 @@ def set_cell_background(cell, fill_color):
     shd.set(qn('w:fill'), fill_color)
     tcPr.append(shd)
 
-def parse_html_to_docx(html_content, doc):
-    """Parsea contenido HTML y lo mapea a elementos nativos estructurados de Word."""
-    soup = BeautifulSoup(html_content, 'html.parser')
-    
-    # Si el contenido viene plano sin etiquetas, lo envolvemos en un párrafo
-    if not soup.find():
-        p = doc.add_paragraph()
-        p.paragraph_format.space_after = Pt(8)
-        p.paragraph_format.line_spacing = 1.15
-        p.add_run(html_content)
-        return
-
-    for element in soup.children:
-        if element.name is None:
-            texto = element.string
-            if texto and texto.strip():
-                p = doc.add_paragraph()
-                p.paragraph_format.space_after = Pt(6)
-                p.paragraph_format.line_spacing = 1.15
-                p.add_run(texto.strip())
-        
-        elif element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-            level = int(element.name[1])
-            p = doc.add_paragraph()
-            p.paragraph_format.space_before = Pt(12)
-            p.paragraph_format.space_after = Pt(4)
-            run = p.add_run(element.get_text().strip())
-            run.font.bold = True
-            run.font.name = 'Calibri'
-            if level == 1:
-                run.font.size = Pt(16)
-                run.font.color.rgb = RGBColor(30, 58, 138)
-            elif level == 2:
-                run.font.size = Pt(13.5)
-                run.font.color.rgb = RGBColor(30, 41, 59)
-            else:
-                run.font.size = Pt(12)
-                run.font.color.rgb = RGBColor(51, 65, 85)
-
-        elif element.name == 'p':
-            p = doc.add_paragraph()
-            p.paragraph_format.space_after = Pt(8)
-            p.paragraph_format.line_spacing = 1.15
-            _process_inline_elements(element, p)
-
-        elif element.name in ['ul', 'ol']:
-            is_ordered = (element.name == 'ol')
-            for idx, li in enumerate(element.find_all('li', recursive=False)):
-                p = doc.add_paragraph(style='List Number' if is_ordered else 'List Bullet')
-                p.paragraph_format.space_after = Pt(4)
-                p.paragraph_format.line_spacing = 1.15
-                _process_inline_elements(li, p)
-
-        elif element.name == 'table':
-            rows = element.find_all('tr')
-            if rows:
-                num_cols = max(len(r.find_all(['th', 'td'])) for r in rows)
-                table = doc.add_table(rows=len(rows), cols=num_cols)
-                table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                table.style = 'Table Grid'
-                
-                for r_idx, row in enumerate(rows):
-                    cols = row.find_all(['th', 'td'])
-                    for c_idx, col in enumerate(cols):
-                        cell = table.cell(r_idx, c_idx)
-                        p = cell.paragraphs[0]
-                        p.paragraph_format.space_before = Pt(4)
-                        p.paragraph_format.space_after = Pt(4)
-                        p.add_run(col.get_text().strip())
-                        if col.name == 'th':
-                            set_cell_background(cell, "E2E8F0")
-                            for run in p.runs:
-                                run.font.bold = True
-
-        elif element.name in ['div', 'section', 'article']:
-            # Recursividad para contenedores anidados
-            parse_html_to_docx(str(element), doc)
-
-def _process_inline_elements(tag, paragraph):
-    """Procesa etiquetas internas como <b>, <i>, <strong>, <em>, <br> dentro de párrafos."""
-    for child in tag.children:
-        if child.name is None:
-            text = child.string or ''
-            if text:
-                paragraph.add_run(text)
-        elif child.name in ['strong', 'b']:
-            run = paragraph.add_run(child.get_text())
-            run.font.bold = True
-        elif child.name in ['em', 'i']:
-            run = paragraph.add_run(child.get_text())
-            run.font.italic = True
-        elif child.name == 'br':
-            paragraph.add_run('\n')
-        else:
-            run = paragraph.add_run(child.get_text())
-
+class HTMLTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.paragraphs = ['']
+    def handle_data(self, data):
+        self.paragraphs[-1] += data
+    def handle_starttag(self, tag, attrs):
+        if tag in ['p', 'br', 'div', 'tr', 'h1', 'h2', 'h3', 'li']:
+            if self.paragraphs[-1].strip():
+                self.paragraphs.append('')
 
 @app.get("/api/scanners/descargar/{scanner_id}")
 async def descargar_scanner_docx(scanner_id: str, email: str):
     try:
+        # Búsqueda segura en MongoDB
         filtro = {"_id": ObjectId(scanner_id), "email": email}
         registro = scanners_historial_collection.find_one(filtro)
         
@@ -1330,64 +1245,115 @@ async def descargar_scanner_docx(scanner_id: str, email: str):
 
         doc = Document()
 
-        # Márgenes estándar profesionales
+        # Configuración de Márgenes de Página (1 pulgada / 2.54 cm)
         for section in doc.sections:
             section.top_margin = Inches(1)
             section.bottom_margin = Inches(1)
             section.left_margin = Inches(1)
             section.right_margin = Inches(1)
 
-        # Configuración base de fuente
+        # Estilo Global Normal (Tipografía y Color Profesional)
         style = doc.styles['Normal']
         font = style.font
         font.name = 'Calibri'
         font.size = Pt(11)
-        font.color.rgb = RGBColor(51, 51, 51)
+        font.color.rgb = RGBColor(51, 51, 51) # Gris oscuro (#333333)
 
-        # Encabezado visual del documento
+        # --- ENCABEZADO / TÍTULO PRINCIPAL ---
         title_p = doc.add_paragraph()
+        title_p.paragraph_format.space_before = Pt(0)
         title_p.paragraph_format.space_after = Pt(2)
         run_title = title_p.add_run("ActaProCore - Documento Escaneado")
-        run_title.font.size = Pt(16)
+        run_title.font.name = 'Calibri'
+        run_title.font.size = Pt(18)
         run_title.font.bold = True
-        run_title.font.color.rgb = RGBColor(30, 58, 138)
+        run_title.font.color.rgb = RGBColor(30, 58, 138) # Azul corporativo oscuro (#1E3A8A)
 
+        # Subtítulo con nombre del archivo original
         sub_p = doc.add_paragraph()
-        sub_p.paragraph_format.space_after = Pt(12)
-        run_sub = sub_p.add_run(f"Fuente: {registro.get('nombre', 'Documento')}")
-        run_sub.font.size = Pt(10)
+        sub_p.paragraph_format.space_after = Pt(14)
+        run_sub = sub_p.add_run(f"Archivo Fuente: {registro.get('nombre', 'Documento')}")
+        run_sub.font.size = Pt(11.5)
         run_sub.font.italic = True
-        run_sub.font.color.rgb = RGBColor(100, 116, 139)
+        run_sub.font.color.rgb = RGBColor(100, 116, 139) # Slate gray
 
-        # Tabla compacta de metadatos
+        # --- TABLA DE METADATOS EJECUTIVA ---
         table = doc.add_table(rows=2, cols=2)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.autofit = False
+
+        table.columns[0].width = Inches(2.2)
+        table.columns[1].width = Inches(4.3)
+
         meta_data = [
-            ("Fecha:", datetime.now().strftime("%Y-%m-%d %H:%M")),
-            ("Usuario:", email)
+            ("Fecha de Generación:", datetime.now().strftime("%Y-%m-%d %H:%M")),
+            ("Usuario Autorizado:", email)
         ]
+
         for i, (label, val) in enumerate(meta_data):
             row = table.rows[i]
-            c0, c1 = row.cells[0], row.cells[1]
-            c0.paragraphs[0].add_run(label).font.bold = True
-            c1.paragraphs[0].add_run(str(val))
-            set_cell_background(c0, "F1F5F9")
-            set_cell_background(c1, "F1F5F9")
+            
+            # Celda Etiqueta
+            cell_0 = row.cells[0]
+            p0 = cell_0.paragraphs[0]
+            p0.paragraph_format.space_before = Pt(5)
+            p0.paragraph_format.space_after = Pt(5)
+            r0 = p0.add_run(label)
+            r0.font.bold = True
+            r0.font.size = Pt(9.5)
+            r0.font.color.rgb = RGBColor(71, 85, 105)
+            set_cell_background(cell_0, "F1F5F9") # Gris muy claro estilo Tailwind
 
-        doc.add_paragraph().paragraph_format.space_after = Pt(8)
+            # Celda Valor
+            cell_1 = row.cells[1]
+            p1 = cell_1.paragraphs[0]
+            p1.paragraph_format.space_before = Pt(5)
+            p1.paragraph_format.space_after = Pt(5)
+            r1 = p1.add_run(str(val))
+            r1.font.size = Pt(9.5)
+            r1.font.color.rgb = RGBColor(15, 23, 42)
+            set_cell_background(cell_1, "F1F5F9")
 
-        # --- AQUÍ SE INSERTA TODO EL CONTENIDO HTML FORMATEADO IGUAL AL ORIGINAL ---
-        contenido_html = registro.get('contenido', '')
-        parse_html_to_docx(contenido_html, doc)
+        # Espaciador
+        spacer = doc.add_paragraph()
+        spacer.paragraph_format.space_after = Pt(12)
 
-        # Pie de página
+        # --- SECCIÓN DE CONTENIDO PRINCIPAL ---
+        heading_content = doc.add_paragraph()
+        heading_content.paragraph_format.space_before = Pt(8)
+        heading_content.paragraph_format.space_after = Pt(6)
+        run_h = heading_content.add_run("Contenido Extraído / Transcripción")
+        run_h.font.size = Pt(13)
+        run_h.font.bold = True
+        run_h.font.color.rgb = RGBColor(30, 41, 59)
+
+        # Procesamiento y limpieza de contenido HTML
+        contenido = registro.get('contenido', '')
+        parser = HTMLTextExtractor()
+        parser.feed(contenido)
+        parrafos_limpios = [p.strip() for p in parser.paragraphs if p.strip()]
+
+        if not parrafos_limpios:
+            parrafos_limpios = [contenido]
+
+        for texto_parrafo in parrafos_limpios:
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(8)
+            p.paragraph_format.line_spacing = 1.15
+            p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            run_p = p.add_run(texto_parrafo)
+            run_p.font.size = Pt(11)
+            run_p.font.color.rgb = RGBColor(51, 51, 51)
+
+        # --- PIE DE PÁGINA ---
         footer = doc.sections[0].footer
         footer_p = footer.paragraphs[0]
         footer_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        run_f = footer_p.add_run("Generado por ActaProCore")
+        run_f = footer_p.add_run("Generado automáticamente por ActaProCore")
         run_f.font.size = Pt(8.5)
         run_f.font.color.rgb = RGBColor(148, 163, 184)
 
+        # Guardar en buffer de memoria
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)
@@ -1395,61 +1361,19 @@ async def descargar_scanner_docx(scanner_id: str, email: str):
         nombre_base = registro.get('nombre', 'documento').replace('.pdf', '').replace('.jpg', '').replace('.png', '')
         nombre_archivo = f"{nombre_base}_ActaProCore.docx"
 
+        headers = {
+            'Content-Disposition': f'attachment; filename="{nombre_archivo}"'
+        }
         return Response(
             content=buffer.getvalue(),
             media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            headers={'Content-Disposition': f'attachment; filename="{nombre_archivo}"'}
+            headers=headers
         )
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
-from reportlab.lib import colors
-from reportlab.pdfgen import canvas
-import re
-import io
-
-class NumberedCanvas(canvas.Canvas):
-    """ Canvas personalizado para agregar pie de página profesional con numeración """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.pages = []
-
-    def showPage(self):
-        self.pages.append(dict(self.__dict__))
-        self._startPage()
-
-    def save(self):
-        num_pages = len(self.pages)
-        for page in self.pages:
-            self.__dict__.update(page)
-            self.draw_footer(num_pages)
-            super().showPage()
-        super().save()
-
-    def draw_footer(self, total_pages):
-        self.saveState()
-        self.setFont("Helvetica", 8)
-        self.setFillColor(colors.HexColor("#64748B"))
-        
-        # Línea divisoria sutil en el pie de página
-        self.setStrokeColor(colors.HexColor("#CBD5E1"))
-        self.setLineWidth(0.5)
-        self.line(54, 40, letter[0] - 54, 40)
-        
-        # Texto del pie
-        footer_text = f"Generado mediante ActasPro AI • Página {self._pageNumber} de {total_pages}"
-        self.drawRightString(letter[0] - 54, 25, footer_text)
-        
-        # Sello corporativo o fecha en la esquina inferior izquierda
-        self.drawString(54, 25, "Documento Digital Verificado")
-        self.restoreState()
 
 
 from fastapi.responses import Response
