@@ -1204,20 +1204,9 @@ from fastapi import Response, HTTPException
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 from bson import ObjectId
 from datetime import datetime
 from html.parser import HTMLParser
-
-def set_cell_background(cell, fill_color):
-    tcPr = cell._tc.get_or_add_tcPr()
-    shd = OxmlElement('w:shd')
-    shd.set(qn('w:val'), 'clear')
-    shd.set(qn('w:color'), 'auto')
-    shd.set(qn('w:fill'), fill_color)
-    tcPr.append(shd)
 
 class HTMLTextExtractor(HTMLParser):
     def __init__(self):
@@ -1259,75 +1248,7 @@ async def descargar_scanner_docx(scanner_id: str, email: str):
         font.size = Pt(11)
         font.color.rgb = RGBColor(51, 51, 51) # Gris oscuro (#333333)
 
-        # --- ENCABEZADO / TÍTULO PRINCIPAL ---
-        title_p = doc.add_paragraph()
-        title_p.paragraph_format.space_before = Pt(0)
-        title_p.paragraph_format.space_after = Pt(2)
-        run_title = title_p.add_run("ActaProCore - Documento Escaneado")
-        run_title.font.name = 'Calibri'
-        run_title.font.size = Pt(18)
-        run_title.font.bold = True
-        run_title.font.color.rgb = RGBColor(30, 58, 138) # Azul corporativo oscuro (#1E3A8A)
-
-        # Subtítulo con nombre del archivo original
-        sub_p = doc.add_paragraph()
-        sub_p.paragraph_format.space_after = Pt(14)
-        run_sub = sub_p.add_run(f"Archivo Fuente: {registro.get('nombre', 'Documento')}")
-        run_sub.font.size = Pt(11.5)
-        run_sub.font.italic = True
-        run_sub.font.color.rgb = RGBColor(100, 116, 139) # Slate gray
-
-        # --- TABLA DE METADATOS EJECUTIVA ---
-        table = doc.add_table(rows=2, cols=2)
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER
-        table.autofit = False
-
-        table.columns[0].width = Inches(2.2)
-        table.columns[1].width = Inches(4.3)
-
-        meta_data = [
-            ("Fecha de Generación:", datetime.now().strftime("%Y-%m-%d %H:%M")),
-            ("Usuario Autorizado:", email)
-        ]
-
-        for i, (label, val) in enumerate(meta_data):
-            row = table.rows[i]
-            
-            # Celda Etiqueta
-            cell_0 = row.cells[0]
-            p0 = cell_0.paragraphs[0]
-            p0.paragraph_format.space_before = Pt(5)
-            p0.paragraph_format.space_after = Pt(5)
-            r0 = p0.add_run(label)
-            r0.font.bold = True
-            r0.font.size = Pt(9.5)
-            r0.font.color.rgb = RGBColor(71, 85, 105)
-            set_cell_background(cell_0, "F1F5F9") # Gris muy claro estilo Tailwind
-
-            # Celda Valor
-            cell_1 = row.cells[1]
-            p1 = cell_1.paragraphs[0]
-            p1.paragraph_format.space_before = Pt(5)
-            p1.paragraph_format.space_after = Pt(5)
-            r1 = p1.add_run(str(val))
-            r1.font.size = Pt(9.5)
-            r1.font.color.rgb = RGBColor(15, 23, 42)
-            set_cell_background(cell_1, "F1F5F9")
-
-        # Espaciador
-        spacer = doc.add_paragraph()
-        spacer.paragraph_format.space_after = Pt(12)
-
-        # --- SECCIÓN DE CONTENIDO PRINCIPAL ---
-        heading_content = doc.add_paragraph()
-        heading_content.paragraph_format.space_before = Pt(8)
-        heading_content.paragraph_format.space_after = Pt(6)
-        run_h = heading_content.add_run("Contenido Extraído / Transcripción")
-        run_h.font.size = Pt(13)
-        run_h.font.bold = True
-        run_h.font.color.rgb = RGBColor(30, 41, 59)
-
-        # Procesamiento y limpieza de contenido HTML
+        # --- SECCIÓN DE CONTENIDO PRINCIPAL (Sin títulos ni tabla de metadatos) ---
         contenido = registro.get('contenido', '')
         parser = HTMLTextExtractor()
         parser.feed(contenido)
