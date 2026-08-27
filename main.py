@@ -2215,9 +2215,8 @@ class SoporteRequest(BaseModel):
 @app.post("/api/soporte/faqs")
 def guardar_consulta_soporte(data: SoporteRequest):
     try:
-        print("=== INTENTANDO CONECTAR A MONGO ===")
-        print("Base de datos actual:", db.name)
-        print("Colección actual:", soporte_collection.name)
+        print("DEBUG: Entró al endpoint /api/soporte/faqs")
+        print("Datos recibidos:", data.dict())
         
         registro = {
             "tipo": data.tipoConsulta,
@@ -2230,16 +2229,16 @@ def guardar_consulta_soporte(data: SoporteRequest):
         }
         
         resultado = soporte_collection.insert_one(registro)
-        print(f"¡ÉXITO! Documento insertado con ID: {resultado.inserted_id}")
+        print(f"DEBUG: ¡ÉXITO! Insertado en 'soporte_feedback' con ID: {resultado.inserted_id}")
 
         return {
-            "respuesta": f"Gracias {data.nombre} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
+            "respuesta": f"Gracias {data.nombre or 'Estimado usuario'} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
             "videoUrl": None
         }
     except Exception as e:
-        print(f"❌ ERROR CRÍTICO EN MONGO: {str(e)}")
+        print(f"DEBUG ERROR: Falló la inserción en Mongo: {str(e)}")
         return {"error": str(e)}, 500
-
+        
 @app.get("/api/soporte/mensajes")
 def obtener_mensajes_soporte():
     try:
