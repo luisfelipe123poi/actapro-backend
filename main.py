@@ -871,37 +871,65 @@ async def descargar_acta(acta_id: str, email: str):
         return RedirectResponse(url=file_url, status_code=303)
 
     # 6. Plan de Respaldo: Generación dinámica del documento Word (.docx)
-    contenido_texto = acta.get("contenido", "") or acta.get("transcripcion", "")
+    contenido_texto = acta.get("contenido", "") or acta.get("transcripcion", "") or acta.get("texto", "")
     nombre_archivo = acta.get("nombre_acta") or f"Acta_Asamblea_{acta_id[:8]}.docx"
     
     if not nombre_archivo.endswith(".docx"):
         nombre_archivo += ".docx"
 
     doc = Document()
+    
+    # Aplicar márgenes y estilos profesionales
+    for section in doc.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Calibri'
+    font.size = Pt(11)
+    font.color.rgb = RGBColor(51, 51, 51)
+
+    # Título Principal
     titulo_principal = doc.add_heading("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", level=0)
-    titulo_principal.alignment = 1 # Centrado
+    titulo_principal.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Subtítulo con nombre del acta
+    sub_p = doc.add_paragraph()
+    sub_p.paragraph_format.space_after = Pt(14)
+    run_sub = sub_p.add_run(f"Referencia: {nombre_archivo.replace('.docx', '')}")
+    run_sub.font.size = Pt(10)
+    run_sub.font.italic = True
+    run_sub.font.color.rgb = RGBColor(100, 116, 139)
 
-    # Parser básico de formato Markdown a Word
-    for linea in contenido_texto.split("\n"):
-        linea_clean = linea.strip()
-        if not linea_clean:
-            continue
+    # Si el contenido contiene etiquetas HTML, usa el parser correspondiente; si no, procesa Markdown/Texto plano
+    if "<" in contenido_texto and ">" in contenido_texto and 'parse_html_to_docx' in globals():
+        parse_html_to_docx(contenido_texto, doc)
+    else:
+        for linea in contenido_texto.split("\n"):
+            linea_clean = linea.strip()
+            if not linea_clean:
+                continue
 
-        if linea_clean.startswith("# "):
-            doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
-        elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
-            doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
-        else:
-            p = doc.add_paragraph()
-            if "**" in linea_clean:
-                partes = linea_clean.split("**")
-                for i, parte in enumerate(partes):
-                    if parte:
-                        run = p.add_run(parte)
-                        if i % 2 == 1: # Texto en negrita
-                            run.bold = True
+            if linea_clean.startswith("# "):
+                doc.add_heading(linea_clean.replace("# ", "").strip(), level=1)
+            elif linea_clean.startswith("## ") or linea_clean.startswith("### "):
+                doc.add_heading(linea_clean.replace("#", "").strip(), level=2)
             else:
-                p.add_run(linea_clean)
+                p = doc.add_paragraph()
+                p.paragraph_format.space_after = Pt(8)
+                p.paragraph_format.line_spacing = 1.15
+                if "**" in linea_clean:
+                    partes = linea_clean.split("**")
+                    for i, parte in enumerate(partes):
+                        if parte:
+                            run = p.add_run(parte)
+                            if i % 2 == 1: 
+                                run.bold = True
+                else:
+                    p.add_run(linea_clean)
 
     # Guardar en memoria y retornar como archivo descargable
     doc_io = BytesIO()
@@ -913,20 +941,6 @@ async def descargar_acta(acta_id: str, email: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
     )
-
-import os
-import base64
-import pymupdf
-import pdfplumber
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
-from typing import Optional
-from openai import OpenAI
-
-# Importar la tarea Celery desde tasks.py
-from tasks import task_escanear_documento
-
-# Inicializa el cliente de OpenAI
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
 @app.post("/escanear")
