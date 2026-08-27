@@ -1211,8 +1211,6 @@ from bson import ObjectId
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-# ================= UTILIDADES HTML A WORD =================
-
 def set_cell_background(cell, fill_color):
     tcPr = cell._tc.get_or_add_tcPr()
     shd = OxmlElement('w:shd')
@@ -1223,24 +1221,14 @@ def set_cell_background(cell, fill_color):
 
 def parse_html_to_docx(html_content, doc):
     """Parsea contenido HTML y lo mapea a elementos nativos estructurados de Word."""
+    soup = BeautifulSoup(html_content, 'html.parser')
     
-    # Respaldo por si el contenido viene vacío
-    if not html_content or not str(html_content).strip():
-        p = doc.add_paragraph()
-        p.paragraph_format.space_after = Pt(8)
-        run = p.add_run("[Aviso: El campo 'contenido' de este registro en MongoDB está vacío]")
-        run.font.italic = True
-        run.font.color.rgb = RGBColor(220, 38, 38)
-        return
-
-    soup = BeautifulSoup(str(html_content), 'html.parser')
-    
-    # Si el contenido viene plano sin etiquetas HTML válidas
+    # Si el contenido viene plano sin etiquetas, lo envolvemos en un párrafo
     if not soup.find():
         p = doc.add_paragraph()
         p.paragraph_format.space_after = Pt(8)
         p.paragraph_format.line_spacing = 1.15
-        p.add_run(str(html_content).strip())
+        p.add_run(html_content)
         return
 
     for element in soup.children:
@@ -1278,7 +1266,7 @@ def parse_html_to_docx(html_content, doc):
 
         elif element.name in ['ul', 'ol']:
             is_ordered = (element.name == 'ol')
-            for li in element.find_all('li', recursive=False):
+            for idx, li in enumerate(element.find_all('li', recursive=False)):
                 p = doc.add_paragraph(style='List Number' if is_ordered else 'List Bullet')
                 p.paragraph_format.space_after = Pt(4)
                 p.paragraph_format.line_spacing = 1.15
@@ -1306,7 +1294,9 @@ def parse_html_to_docx(html_content, doc):
                                 run.font.bold = True
 
         elif element.name in ['div', 'section', 'article']:
+            # Recursividad para contenedores anidados
             parse_html_to_docx(str(element), doc)
+
 def _process_inline_elements(tag, paragraph):
     """Procesa etiquetas internas como <b>, <i>, <strong>, <em>, <br> dentro de párrafos."""
     for child in tag.children:
@@ -1340,18 +1330,21 @@ async def descargar_scanner_docx(scanner_id: str, email: str):
 
         doc = Document()
 
+        # Márgenes estándar profesionales
         for section in doc.sections:
             section.top_margin = Inches(1)
             section.bottom_margin = Inches(1)
             section.left_margin = Inches(1)
             section.right_margin = Inches(1)
 
+        # Configuración base de fuente
         style = doc.styles['Normal']
         font = style.font
         font.name = 'Calibri'
         font.size = Pt(11)
         font.color.rgb = RGBColor(51, 51, 51)
 
+        # Encabezado visual del documento
         title_p = doc.add_paragraph()
         title_p.paragraph_format.space_after = Pt(2)
         run_title = title_p.add_run("ActaProCore - Documento Escaneado")
@@ -1366,6 +1359,7 @@ async def descargar_scanner_docx(scanner_id: str, email: str):
         run_sub.font.italic = True
         run_sub.font.color.rgb = RGBColor(100, 116, 139)
 
+        # Tabla compacta de metadatos
         table = doc.add_table(rows=2, cols=2)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         meta_data = [
@@ -1382,9 +1376,11 @@ async def descargar_scanner_docx(scanner_id: str, email: str):
 
         doc.add_paragraph().paragraph_format.space_after = Pt(8)
 
+        # --- AQUÍ SE INSERTA TODO EL CONTENIDO HTML FORMATEADO IGUAL AL ORIGINAL ---
         contenido_html = registro.get('contenido', '')
         parse_html_to_docx(contenido_html, doc)
 
+        # Pie de página
         footer = doc.sections[0].footer
         footer_p = footer.paragraphs[0]
         footer_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
