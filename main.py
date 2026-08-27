@@ -1208,16 +1208,80 @@ from bson import ObjectId
 from datetime import datetime
 from html.parser import HTMLParser
 
-class HTMLTextExtractor(HTMLParser):
-    def __init__(self):
+class HTMLToDocxParser(HTMLParser):
+    def __init__(self, doc):
         super().__init__()
-        self.paragraphs = ['']
-    def handle_data(self, data):
-        self.paragraphs[-1] += data
+        self.doc = doc
+        self.current_tag = None
+        self.current_text = ""
+        self.is_bold = False
+
     def handle_starttag(self, tag, attrs):
-        if tag in ['p', 'br', 'div', 'tr', 'h1', 'h2', 'h3', 'li']:
-            if self.paragraphs[-1].strip():
-                self.paragraphs.append('')
+        tag = tag.lower()
+        if tag in ['h1', 'h2', 'h3', 'p', 'div', 'br', 'li']:
+            self._flush_text()
+            self.current_tag = tag
+
+        if tag in ['strong', 'b']:
+            self._flush_text()
+            self.is_bold = True
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in ['h1', 'h2', 'h3', 'p', 'div', 'li']:
+            self._flush_text()
+            self.current_tag = None
+        elif tag in ['strong', 'b']:
+            self._flush_text()
+            self.is_bold = False
+
+    def handle_data(self, data):
+        self.current_text += data
+
+    def _flush_text(self):
+        text = self.current_text.strip()
+        if not text and self.current_tag != 'br':
+            self.current_text = ""
+            return
+
+        if self.current_tag == 'h1':
+            p = self.doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(12)
+            p.paragraph_format.space_after = Pt(6)
+            run = p.add_run(text)
+            run.font.name = 'Calibri'
+            run.font.size = Pt(16)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(30, 58, 138)
+        elif self.current_tag == 'h2':
+            p = self.doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(10)
+            p.paragraph_format.space_after = Pt(4)
+            run = p.add_run(text)
+            run.font.name = 'Calibri'
+            run.font.size = Pt(14)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(51, 65, 85)
+        elif self.current_tag == 'h3':
+            p = self.doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(8)
+            p.paragraph_format.space_after = Pt(2)
+            run = p.add_run(text)
+            run.font.name = 'Calibri'
+            run.font.size = Pt(12)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(71, 85, 105)
+        else:
+            p = self.doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(8)
+            p.paragraph_format.line_spacing = 1.15
+            run = p.add_run(text)
+            run.font.name = 'Calibri'
+            run.font.size = Pt(11)
+            run.font.bold = self.is_bold
+            run.font.color.rgb = RGBColor(51, 51, 51)
+
+        self.current_text = ""
 
 @app.get("/api/scanners/descargar/{scanner_id}")
 async def descargar_scanner_docx(scanner_id: str, email: str):
@@ -1241,30 +1305,32 @@ async def descargar_scanner_docx(scanner_id: str, email: str):
             section.left_margin = Inches(1)
             section.right_margin = Inches(1)
 
-        # Estilo Global Normal (Tipografía y Color Profesional)
+        # Estilo Global Normal
         style = doc.styles['Normal']
         font = style.font
         font.name = 'Calibri'
         font.size = Pt(11)
-        font.color.rgb = RGBColor(51, 51, 51) # Gris oscuro (#333333)
+        font.color.rgb = RGBColor(51, 51, 51)
 
-        # --- SECCIÓN DE CONTENIDO PRINCIPAL (Sin títulos ni tabla de metadatos) ---
+        # Procesamiento del contenido HTML respetando etiquetas de título y formato
         contenido = registro.get('contenido', '')
-        parser = HTMLTextExtractor()
-        parser.feed(contenido)
-        parrafos_limpios = [p.strip() for p in parser.paragraphs if p.strip()]
-
-        if not parrafos_limpios:
-            parrafos_limpios = [contenido]
-
-        for texto_parrafo in parrafos_limpios:
-            p = doc.add_paragraph()
-            p.paragraph_format.space_after = Pt(8)
-            p.paragraph_format.line_spacing = 1.15
-            p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            run_p = p.add_run(texto_parrafo)
-            run_p.font.size = Pt(11)
-            run_p.font.color.rgb = RGBColor(51, 51, 51)
+        
+        if "<" in contenido and ">" in contenido:
+            parser = HTMLToDocxParser(doc)
+            parser.feed(contenido)
+            parser._flush_text()
+        else:
+            # Plan de respaldo si es texto plano
+            for linea in contenido.split("\n"):
+                linea_clean = linea.strip()
+                if not linea_clean:
+                    continue
+                p = doc.add_paragraph()
+                p.paragraph_format.space_after = Pt(8)
+                p.paragraph_format.line_spacing = 1.15
+                run = p.add_run(linea_clean)
+                run.font.size = Pt(11)
+                run.font.color.rgb = RGBColor(51, 51, 51)
 
         # --- PIE DE PÁGINA ---
         footer = doc.sections[0].footer
