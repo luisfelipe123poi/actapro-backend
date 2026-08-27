@@ -1223,13 +1223,24 @@ def set_cell_background(cell, fill_color):
 
 def parse_html_to_docx(html_content, doc):
     """Parsea contenido HTML y lo mapea a elementos nativos estructurados de Word."""
-    soup = BeautifulSoup(html_content, 'html.parser')
     
+    # Respaldo por si el contenido viene vacío
+    if not html_content or not str(html_content).strip():
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(8)
+        run = p.add_run("[Aviso: El campo 'contenido' de este registro en MongoDB está vacío]")
+        run.font.italic = True
+        run.font.color.rgb = RGBColor(220, 38, 38)
+        return
+
+    soup = BeautifulSoup(str(html_content), 'html.parser')
+    
+    # Si el contenido viene plano sin etiquetas HTML válidas
     if not soup.find():
         p = doc.add_paragraph()
         p.paragraph_format.space_after = Pt(8)
         p.paragraph_format.line_spacing = 1.15
-        p.add_run(html_content)
+        p.add_run(str(html_content).strip())
         return
 
     for element in soup.children:
@@ -1267,7 +1278,7 @@ def parse_html_to_docx(html_content, doc):
 
         elif element.name in ['ul', 'ol']:
             is_ordered = (element.name == 'ol')
-            for idx, li in enumerate(element.find_all('li', recursive=False)):
+            for li in element.find_all('li', recursive=False):
                 p = doc.add_paragraph(style='List Number' if is_ordered else 'List Bullet')
                 p.paragraph_format.space_after = Pt(4)
                 p.paragraph_format.line_spacing = 1.15
@@ -1296,7 +1307,6 @@ def parse_html_to_docx(html_content, doc):
 
         elif element.name in ['div', 'section', 'article']:
             parse_html_to_docx(str(element), doc)
-
 def _process_inline_elements(tag, paragraph):
     """Procesa etiquetas internas como <b>, <i>, <strong>, <em>, <br> dentro de párrafos."""
     for child in tag.children:
