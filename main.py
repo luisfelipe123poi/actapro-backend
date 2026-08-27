@@ -966,6 +966,83 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
 
+@app.get("/api/actas/descargar-pdf/{acta_id}")
+async def descargar_acta_pdf(acta_id: str, email: str):
+    # Buscar el acta en la base de datos por _id de MongoDB o por nombre
+    acta = None
+    try:
+        acta = actas_collection.find_one({"_id": ObjectId(acta_id), "email": email})
+    except Exception:
+        pass
+        
+    if not acta:
+        acta = actas_collection.find_one({"nombre_acta": acta_id, "email": email})
+        
+    if not acta:
+        raise HTTPException(status_code=404, detail="Acta no encontrada.")
+        
+    contenido_texto = acta.get("contenido", "")
+    nombre_base = acta.get("nombre_acta", "Acta_Asamblea").replace(".docx", "").replace(".pdf", "")
+    nombre_archivo_pdf = f"{nombre_base}.pdf"
+    
+    # Configuración del PDF en memoria usando ReportLab
+    pdf_buffer = io.BytesIO()
+    
+    doc = SimpleDocTemplate(
+        pdf_buffer, 
+        pagesize=letter,
+        rightMargin=54,
+        leftMargin=54,
+        topMargin=54,
+        bottomMargin=54
+    )
+    
+    story = []
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'ActaTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=13,
+        leading=16,
+        alignment=TA_LEFT,
+        spaceAfter=15,
+        textColor=styles['Normal'].textColor
+    )
+    
+    body_style = ParagraphStyle(
+        'ActaBody',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        spaceAfter=8
+    )
+    
+    story.append(Paragraph("ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS", title_style))
+    story.append(Spacer(1, 10))
+    
+    lineas = contenido_texto.split('\n')
+    for linea in lineas:
+        linea_limpia = linea.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        linea_limpia = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', linea_limpia)
+        linea_limpia = linea_limpia.replace('*', '').strip()
+        
+        if linea_limpia:
+            story.append(Paragraph(linea_limpia, body_style))
+        else:
+            story.append(Spacer(1, 6))
+
+    doc.build(story)
+    pdf_buffer.seek(0)
+    
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo_pdf}"'}
+    )
 
 
 from bson import ObjectId
@@ -1385,129 +1462,15 @@ import re
 import io
 from bson import ObjectId
 
-from io import BytesIO
-from fastapi import Response, HTTPException
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
-from bson import ObjectId
-from bs4 import BeautifulSoup
-import re
-
-def parse_html_to_reportlab_story(html_content, story, styles):
-    """Parsea contenido HTML con BeautifulSoup y lo añade al story de ReportLab respetando su formato."""
-    soup = BeautifulSoup(html_content, 'html.parser')
-    
-    body_style = ParagraphStyle(
-        'DynamicBody',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=10,
-        leading=14,
-        alignment=TA_JUSTIFY,
-        spaceAfter=6
-    )
-    
-    h1_style = ParagraphStyle(
-        'DynamicH1',
-        parent=styles['Heading1'],
-        fontName='Helvetica-Bold',
-        fontSize=14,
-        leading=18,
-        spaceBefore=12,
-        spaceAfter=8
-    )
-
-    h2_style = ParagraphStyle(
-        'DynamicH2',
-        parent=styles['Heading2'],
-        fontName='Helvetica-Bold',
-        fontSize=12,
-        leading=15,
-        spaceBefore=10,
-        spaceAfter=6
-    )
-
-    if not soup.find():
-        texto_limpio = html_content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        story.append(Paragraph(texto_limpio, body_style))
-        return
-
-    for element in soup.children:
-        if element.name is None:
-            texto = element.string
-            if texto and texto.strip():
-                t_clean = texto.strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                story.append(Paragraph(t_clean, body_style))
-        elif element.name == 'h1':
-            t_clean = element.get_text().strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            story.append(Paragraph(t_clean, h1_style))
-        elif element.name in ['h2', 'h3']:
-            t_clean = element.get_text().strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            story.append(Paragraph(t_clean, h2_style))
-        elif element.name in ['p', 'div']:
-            # Extraer contenido interno respetando negritas (<b>, <strong>) e cursivas (<i>, <em>)
-            inner_html = ''.join(str(child) for child in element.children)
-            inner_html = inner_html.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            # Convertir etiquetas seguras de vuelta a tags de ReportLab
-            inner_html = re.sub(r'&lt;b&gt;|&lt;strong&gt;', '<b>', inner_html, flags=re.IGNORECASE)
-            inner_html = re.sub(r'&lt;/b&gt;|&lt;/strong&gt;', '</b>', inner_html, flags=re.IGNORECASE)
-            inner_html = re.sub(r'&lt;i&gt;|&lt;em&gt;', '<i>', inner_html, flags=re.IGNORECASE)
-            inner_html = re.sub(r'&lt;/i&gt;|&lt;/em&gt;', '</i>', inner_html, flags=re.IGNORECASE)
-            inner_html = re.sub(r'&lt;br\s*/?&gt;', '<br/>', inner_html, flags=re.IGNORECASE)
-            
-            if inner_html.strip():
-                story.append(Paragraph(inner_html.strip(), body_style))
-        elif element.name in ['ul', 'ol']:
-            for li in element.find_all('li', recursive=False):
-                li_text = "• " + li.get_text().strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                story.append(Paragraph(li_text, body_style))
-
-
-from fastapi.responses import StreamingResponse
-
-# --- ENDPOINT DESCARGA WORD (.docx) ---
-@app.get("/api/scanners/descargar/{scanner_id}")
-async def descargar_scanner_docx(scanner_id: str, email: str):
-    try:
-        filtro = {"_id": ObjectId(scanner_id), "email": email}
-        registro = scanners_historial_collection.find_one(filtro)
-        if not registro:
-            registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
-        if not registro:
-            raise HTTPException(status_code=404, detail="Archivo no encontrado.")
-
-        doc = Document()
-        # ... (configuraciones de márgenes y estilos que ya tienes) ...
-        
-        contenido_html = registro.get('contenido', '')
-        parse_html_to_docx(contenido_html, doc)
-
-        buffer = BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-
-        nombre_base = registro.get('nombre', 'documento').replace('.pdf', '').replace('.jpg', '').replace('.png', '')
-        nombre_archivo = f"{nombre_base}_ActaProCore.docx"
-
-        return StreamingResponse(
-            buffer,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# --- ENDPOINT DESCARGA PDF ---
 @app.get("/api/scanners/descargar-pdf/{scanner_id}")
 async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
     try:
         filtro = {"_id": ObjectId(scanner_id), "email": email}
         registro = scanners_historial_collection.find_one(filtro)
+        
         if not registro:
             registro = scanners_historial_collection.find_one({"nombre": scanner_id, "email": email})
+            
         if not registro:
             raise HTTPException(status_code=404, detail="Archivo no encontrado.")
 
@@ -1515,23 +1478,99 @@ async def descargar_scanner_pdf_backend(scanner_id: str, email: str):
         nombre_archivo_pdf = f"{nombre_base}.pdf"
         contenido_html = registro.get("contenido", "")
 
-        pdf_buffer = BytesIO()
-        doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
+        # Configuración del PDF en memoria usando ReportLab con metadatos corregidos
+        pdf_buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            pdf_buffer, 
+            pagesize=letter,
+            rightMargin=54,
+            leftMargin=54,
+            topMargin=54,
+            bottomMargin=54,
+            title=nombre_base,
+            author="Sistema de Escaneo IA"
+        )
+        
         story = []
         styles = getSampleStyleSheet()
         
-        parse_html_to_reportlab_story(contenido_html, story, styles)
+        # Estilos personalizados
+        h1_style = ParagraphStyle(
+            'ScannerH1',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=14,
+            leading=18,
+            alignment=TA_LEFT,
+            spaceBefore=12,
+            spaceAfter=8
+        )
+
+        h2_style = ParagraphStyle(
+            'ScannerH2',
+            parent=styles['Heading3'],
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            leading=15,
+            alignment=TA_LEFT,
+            spaceBefore=10,
+            spaceAfter=6
+        )
+        
+        body_style = ParagraphStyle(
+            'ScannerBody',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            leading=14,
+            alignment=TA_JUSTIFY,
+            spaceAfter=6
+        )
+
+        # Procesamiento de etiquetas HTML
+        contenido_procesado = re.sub(r'<h1[^>]*>(.*?)</h1>', r'<h1_tag>\1</h1_tag>', contenido_html, flags=re.IGNORECASE | re.DOTALL)
+        contenido_procesado = re.sub(r'<h2[^>]*>(.*?)</h2>', r'<h2_tag>\1</h2_tag>', contenido_procesado, flags=re.IGNORECASE | re.DOTALL)
+        contenido_procesado = re.sub(r'<p[^>]*>(.*?)</p>', r'\1<br/><br/>', contenido_procesado, flags=re.IGNORECASE | re.DOTALL)
+        contenido_procesado = re.sub(r'<br\s*/?>', r'<br/>', contenido_procesado, flags=re.IGNORECASE)
+        contenido_procesado = re.sub(r'<(?:strong)[^>]*>(.*?)</(?:strong)>', r'<b>\1</b>', contenido_procesado, flags=re.IGNORECASE | re.DOTALL)
+        
+        lineas = contenido_procesado.split('\n')
+        
+        for linea in lineas:
+            linea_str = linea.strip()
+            if not linea_str:
+                continue
+                
+            # Verificar h1
+            h1_match = re.search(r'<h1_tag>(.*?)</h1_tag>', linea_str, flags=re.DOTALL)
+            if h1_match:
+                story.append(Paragraph(h1_match.group(1), h1_style))
+                continue
+                
+            # Verificar h2
+            h2_match = re.search(r'<h2_tag>(.*?)</h2_tag>', linea_str, flags=re.DOTALL)
+            if h2_match:
+                story.append(Paragraph(h2_match.group(1), h2_style))
+                continue
+                
+            # Limpiar etiquetas no permitidas en párrafos normales
+            linea_limpia = re.sub(r'<(?!/?b\b)(?!/?br\b)[^>]+>', '', linea_str)
+            linea_limpia = linea_limpia.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            
+            if linea_limpia.strip():
+                story.append(Paragraph(linea_limpia, body_style))
 
         doc.build(story)
         pdf_buffer.seek(0)
         
-        return StreamingResponse(
-            pdf_buffer,
+        return Response(
+            content=pdf_buffer.getvalue(),
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{nombre_archivo_pdf}"'}
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo_pdf}"}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generando PDF: {str(e)}")
+
 
 
 
