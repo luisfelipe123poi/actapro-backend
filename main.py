@@ -1405,8 +1405,8 @@ async def soporte_faqs(req: ConsultaFAQRequest):
     }
     
     resultado = faqs_data.get(req.tipoConsulta, {
-        "respuesta": "Puedes explorar nuestras guías generales en el menú principal.",
-        "videoUrl": "https://res.cloudinary.com/TU_CLOUD_NAME/video/upload/v123456789/video_default.mp4"
+        "respuesta": "Gracias por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
+        
     })
 
     return resultado
