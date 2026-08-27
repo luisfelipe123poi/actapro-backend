@@ -2205,6 +2205,11 @@ def obtener_metricas_sistema():
 from pydantic import BaseModel
 from typing import Optional
 
+from datetime import datetime, timezone
+from typing import Optional
+from bson import ObjectId
+from pydantic import BaseModel
+
 class SoporteRequest(BaseModel):
     tipoConsulta: str
     mensaje: str
@@ -2216,7 +2221,14 @@ class SoporteRequest(BaseModel):
 def guardar_consulta_soporte(data: SoporteRequest):
     try:
         print("DEBUG: Entró al endpoint /api/soporte/faqs")
-        print("Datos recibidos:", data.dict())
+        
+        # Manejo seguro para obtener los datos del modelo pydantic
+        try:
+            datos_dict = data.model_dump()
+        except AttributeError:
+            datos_dict = data.dict()
+            
+        print("Datos recibidos:", datos_dict)
         
         registro = {
             "tipo": data.tipoConsulta,
@@ -2228,16 +2240,19 @@ def guardar_consulta_soporte(data: SoporteRequest):
             "createdAt": datetime.now(timezone.utc)
         }
         
+        # Esta línea crea físicamente la colección 'soporte_feedback' en MongoDB si no existe
         resultado = soporte_collection.insert_one(registro)
         print(f"DEBUG: ¡ÉXITO! Insertado en 'soporte_feedback' con ID: {resultado.inserted_id}")
 
+        nombre_usuario = data.nombre if data.nombre and data.nombre != "Anónimo" else "Estimado usuario"
         return {
-            "respuesta": f"Gracias {data.nombre or 'Estimado usuario'} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
+            "respuesta": f"Gracias {nombre_usuario} por comunicarte con nosotros. Hemos recibido tu mensaje y nuestro equipo se pondrá en contacto contigo en un plazo máximo de 48 horas.",
             "videoUrl": None
         }
     except Exception as e:
         print(f"DEBUG ERROR: Falló la inserción en Mongo: {str(e)}")
-        return {"error": str(e)}, 500
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
         
 @app.get("/api/soporte/mensajes")
 def obtener_mensajes_soporte():
@@ -2248,18 +2263,21 @@ def obtener_mensajes_soporte():
             m.pop("createdAt", None)
         return mensajes
     except Exception as e:
-        return {"error": str(e)}, 500
+        print(f"DEBUG ERROR GET: {str(e)}")
+        return []
 
 @app.delete("/api/soporte/mensajes/{msg_id}")
 def eliminar_mensaje_soporte(msg_id: str):
-    from bson import ObjectId
     try:
         result = soporte_collection.delete_one({"_id": ObjectId(msg_id)})
         if result.deleted_count > 0:
             return {"status": "success"}
-        return {"error": "Mensaje no encontrado"}, 404
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Mensaje no encontrado")
     except Exception as e:
-        return {"error": str(e)}, 500
+        print(f"DEBUG ERROR DELETE: {str(e)}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
