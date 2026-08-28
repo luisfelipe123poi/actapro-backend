@@ -584,7 +584,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
         "auto_return": "approved",
         "notification_url": "https://actapro-backend.onrender.com/api/webhook-mercadopago",
         "statement_descriptor": "ACTABOT PH",
-        "external_reference": email_cliente,
+        "external_reference": f"{email_cliente}|{plan_id}",
     }
 
     try:
@@ -621,7 +621,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
 async def webhook_mercadopago(request: Request):
     """
     Recibe notificaciones automáticas de Mercado Pago, consulta el API oficial,
-    detecta el plan, actualiza los contadores en MongoDB y envía un correo de confirmación con Brevo.
+    detecta el plan de forma blindada mediante monto y referencia, actualiza los contadores en MongoDB y envía un correo con Brevo.
     """
     try:
         body = await request.json()
@@ -636,21 +636,46 @@ async def webhook_mercadopago(request: Request):
                     payment = payment_info
 
                 if payment.get("status") == "approved":
-                    payer_email = payment.get("payer", {}).get("email") or payment.get("external_reference")
+                    payer_email = payment.get("payer", {}).get("email")
+                    ext_ref = payment.get("external_reference", "")
+                    
+                    # Recuperar email de respaldo o dividir la referencia externa
+                    plan_desde_ref = None
+                    if "|" in ext_ref:
+                        parts = ext_ref.split("|")
+                        if not payer_email:
+                            payer_email = parts[0]
+                        plan_desde_ref = parts[1]
+                    elif not payer_email:
+                        payer_email = ext_ref
+
                     if payer_email:
                         payer_email = payer_email.strip().lower()
-                        items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
                         
                         plan_asignado = "basico"
-
-                        for item in items:
-                            title_lower = item.get("title", "").lower()
-                            if "corporativo" in title_lower or "pro" in title_lower:
-                                plan_asignado = "corporativo"
-                            elif "profesional" in title_lower or "intermedio" in title_lower:
-                                plan_asignado = "profesional"
-                            elif "básico" in title_lower or "basico" in title_lower:
-                                plan_asignado = "basico"
+                        
+                        # 1. Intentar por external_reference si viene empaquetado
+                        if plan_desde_ref and plan_desde_ref in PRECIOS_PLANES:
+                            plan_asignado = plan_desde_ref
+                        else:
+                            # 2. Blindaje por monto exacto pagado (transaction_amount)
+                            monto_pagado = float(payment.get("transaction_amount", 0))
+                            for p_id, info in PRECIOS_PLANES.items():
+                                if float(info.get("precio", 0)) == monto_pagado:
+                                    plan_asignado = p_id
+                                    break
+                            
+                            # 3. Si el monto falla, respaldo por lectura de ítems o título
+                            if plan_asignado == "basico":
+                                items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
+                                for item in items:
+                                    title_lower = item.get("title", "").lower()
+                                    if "corporativo" in title_lower or "pro" in title_lower:
+                                        plan_asignado = "corporativo"
+                                        break
+                                    elif "profesional" in title_lower or "intermedio" in title_lower:
+                                        plan_asignado = "profesional"
+                                        break
 
                         info_plan = PRECIOS_PLANES.get(plan_asignado, PRECIOS_PLANES["basico"])
                         
@@ -682,31 +707,106 @@ async def webhook_mercadopago(request: Request):
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Confirmación Oficial de Activación - ActaPro Core</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activación de Licencia - ActaPro Core</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: sans-serif;">
-    <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="padding: 40px 0;">
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="padding: 30px 0; background-color: #f8fafc;">
         <tr>
             <td align="center">
-                <table border="0" cellpadding="0" cellspacing="0" width="640" style="background-color: #ffffff; border-radius: 16px; border: 1px solid #cbd5e1;">
+                <!-- Contenedor Principal -->
+                <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+                    <!-- Cabecera -->
                     <tr>
-                        <td align="left" style="background: #0f172a; padding: 30px; border-bottom: 3px solid #10b981;">
-                            <h1 style="color: #ffffff; margin: 0;">ActaPro <span style="color: #38bdf8;">Core</span></h1>
+                        <td align="left" style="background: #ffffff; padding: 25px 30px; border-bottom: 3px solid #10b981;">
+                            <table width="100%" border="0" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td>
+                                        <!-- PEGA TU LINK AQUÍ -->
+                                        <img src="https://res.cloudinary.com/iuu7h8rj/image/upload/v1787944318/1.png" alt="ActaPro Core" width="130" style="display: block; border: 0; outline: none; text-decoration: none; max-width: 130px; height: auto;">
+                                    </td>
+                                    <td align="right" style="color: #64748b; font-size: 12px;">
+                                        Soporte Oficial
+                                    </td>
+                                </tr>
+                            </table>
                         </td>
                     </tr>
+                    
+                    <!-- Cuerpo del Contenido -->
                     <tr>
-                        <td style="padding: 30px;">
-                            <h2 style="color: #0f172a;">Estimado/a {nombre_usuario},</h2>
-                            <p style="color: #475569;">Su pago ha sido procesado exitosamente y su licencia ya está activa.</p>
-                            
-                            <table width="100%" style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                                <tr><td><strong>Plan:</strong></td><td align="right">{nombre_plan_fmt}</td></tr>
-                                <tr><td><strong>Inversión:</strong></td><td align="right">${precio_pagado:,.0f} COP</td></tr>
-                                <tr><td><strong>Horas de Audio:</strong></td><td align="right">{horas_otorgadas} hrs/mes</td></tr>
-                                <tr><td><strong>Tokens IA:</strong></td><td align="right">{tokens_otorgados:,}</td></tr>
+                        <td style="padding: 35px 30px;">
+                            <h2 style="color: #0f172a; font-size: 20px; margin-top: 0; margin-bottom: 15px;">Hola, {nombre_usuario}</h2>
+                            <p style="color: #334155; font-size: 15px; line-height: 1.6; margin-top: 0; margin-bottom: 20px;">
+                                Te confirmamos que tu pago ha sido procesado exitosamente y tu suscripción ya se encuentra activa en nuestro sistema. A continuación, te compartimos los detalles de tu cuenta y los beneficios acreditados.
+                            </p>
+
+                            <!-- Bloque de Credenciales de Acceso -->
+                            <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; margin-bottom: 25px;">
+                                <tr>
+                                    <td style="padding: 20px;">
+                                        <p style="color: #166534; font-size: 14px; font-weight: 700; margin: 0 0 10px 0;">Tus credenciales de acceso temporal:</p>
+                                        <table width="100%" border="0" cellpadding="4" cellspacing="0">
+                                            <tr>
+                                                <td style="color: #334155; font-size: 14px; width: 90px;"><strong>Correo:</strong></td>
+                                                <td style="color: #0f172a; font-size: 14px; font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 4px; border: 1px solid #d1fae5;">{payer_email}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="color: #334155; font-size: 14px;"><strong>Contraseña:</strong></td>
+                                                <td style="color: #0f172a; font-size: 14px; font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 4px; border: 1px solid #d1fae5;">{password_temporal}</td>
+                                            </tr>
+                                        </table>
+                                        <p style="color: #15803d; font-size: 12px; margin: 10px 0 0 0;">* Te recomendamos iniciar sesión y cambiar tu contraseña por seguridad desde la configuración de tu perfil.</p>
+                                    </td>
+                                </tr>
                             </table>
-                            
-                            <a href="https://actaprocore.com/dashboard" style="background-color: #2563eb; color: #ffffff; padding: 12px 25px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">Acceder a mi Panel</a>
+
+                            <!-- Resumen del Plan -->
+                            <p style="color: #64748b; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 10px 0;">Detalles de la Suscripción</p>
+                            <table width="100%" border="0" cellpadding="10" cellspacing="0" style="background-color: #f8fafc; border-radius: 8px; margin-bottom: 25px; border: 1px solid #e2e8f0;">
+                                <tr>
+                                    <td style="color: #475569; font-size: 14px; border-bottom: 1px solid #e2e8f0;"><strong>Plan Activo:</strong></td>
+                                    <td align="right" style="color: #0f172a; font-size: 14px; font-weight: 600; border-bottom: 1px solid #e2e8f0;">{nombre_plan_fmt}</td>
+                                </tr>
+                                <tr>
+                                    <td style="color: #475569; font-size: 14px; border-bottom: 1px solid #e2e8f0;"><strong>Inversión Total:</strong></td>
+                                    <td align="right" style="color: #0f172a; font-size: 14px; font-weight: 600; border-bottom: 1px solid #e2e8f0;">${precio_pagado:,.0f} COP</td>
+                                </tr>
+                                <tr>
+                                    <td style="color: #475569; font-size: 14px; border-bottom: 1px solid #e2e8f0;"><strong>Capacidad de Audio:</strong></td>
+                                    <td align="right" style="color: #0f172a; font-size: 14px; font-weight: 600; border-bottom: 1px solid #e2e8f0;">{horas_otorgadas} horas/mes</td>
+                                </tr>
+                                <tr>
+                                    <td style="color: #475569; font-size: 14px;"><strong>Tokens de IA:</strong></td>
+                                    <td align="right" style="color: #0f172a; font-size: 14px; font-weight: 600;">{tokens_otorgados:,} tokens</td>
+                                </tr>
+                            </table>
+
+                            <!-- Botón de Acción Principal -->
+                            <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom: 30px;">
+                                <tr>
+                                    <td align="center">
+                                        <a href="https://actaprocore.com/dashboard" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 14px 30px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">Iniciar Sesión en mi Panel</a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="color: #64748b; font-size: 14px; line-height: 1.5; margin: 0;">
+                                Si tienes alguna duda sobre el funcionamiento de la plataforma o requieres soporte técnico adicional, puedes responder directamente a este correo o contactarnos en cualquier momento.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Pie de página con enlaces institucionales para evitar SPAM -->
+                    <tr>
+                        <td align="center" style="background-color: #f8fafc; padding: 20px 30px; border-top: 1px solid #e2e8f0;">
+                            <p style="color: #94a3b8; font-size: 12px; margin: 0 0 10px 0; line-height: 1.4;">
+                                Este es un correo automático generado tras la confirmación de pago en <strong>ActaPro Core</strong>.<br>
+                                Por favor, no compartas tus credenciales de acceso con terceros.
+                            </p>
+                            <p style="color: #cbd5e1; font-size: 11px; margin: 0;">
+                                &copy; 2026 ActaPro Core. Todos los derechos reservados. | <a href="https://actaprocore.com/terminos" target="_blank" style="color: #64748b; text-decoration: underline;">Términos y Condiciones</a>
+                            </p>
                         </td>
                     </tr>
                 </table>
