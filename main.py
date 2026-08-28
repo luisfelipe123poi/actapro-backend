@@ -29,7 +29,7 @@ import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 from sib_api_v3_sdk.models import SendSmtpEmail, SendSmtpEmailSender, SendSmtpEmailTo
 from tasks import task_procesar_asamblea
-from user_routes import router as user_router
+
 
 load_dotenv()
 
@@ -2473,20 +2473,10 @@ def eliminar_mensaje_soporte(msg_id: str):
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from passlib.context import CryptContext
-import os
 
-# Configuración de la conexión a MongoDB
-MONGO_DETAILS = os.getenv("MONGO_URI", "tu_uri_de_mongo_aqui")
-client = AsyncIOMotorClient(MONGO_DETAILS)
-database = client.actapro_core
-
-# Dependencia de base de datos
-async def get_db() -> AsyncIOMotorDatabase:
-    return database
-
-router = APIRouter(prefix="/api/user", tags=["User Configuration"])
+user_config_router = APIRouter(prefix="/api/user", tags=["User Configuration"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -2495,13 +2485,12 @@ class UpdatePasswordRequest(BaseModel):
     current_password: str = Field(..., description="Contraseña provisional o actual")
     new_password: str = Field(..., min_length=6, description="Nueva contraseña elegida por el usuario")
 
-@router.put("/update-password")
-async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
+@user_config_router.put("/update-password")
+async def update_password(payload: UpdatePasswordRequest):
     print(f"--> Correo recibido desde el frontend: '{payload.email}'")
 
-    # 1. Buscar al usuario en la colección de MongoDB (con búsqueda insensible a mayúsculas/minúsculas y espacios)
     clean_email = payload.email.strip().lower()
-    user = await db.users.find_one({
+    user = await users_collection.find_one({
         "email": {"$regex": f"^{clean_email}$", "$options": "i"}
     })
     
@@ -2512,7 +2501,6 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
             detail=f"Usuario no encontrado con el correo: {payload.email}"
         )
 
-    # 2. Verificar la contraseña actual (soporta texto plano y hash de bcrypt)
     stored_password = user.get("password", "")
     
     is_valid = False
@@ -2527,12 +2515,10 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
             detail="La contraseña actual o provisional es incorrecta."
         )
 
-    # 3. Encriptar la nueva contraseña
     hashed_new_password = pwd_context.hash(payload.new_password)
 
-    # 4. Actualizar en la base de datos usando el correo real encontrado
     real_email = user.get("email")
-    result = await db.users.update_one(
+    result = await users_collection.update_one(
         {"email": real_email},
         {"$set": {"password": hashed_new_password}}
     )
@@ -2544,17 +2530,22 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
         )
 
     return {"success": True, "message": "Contraseña actualizada exitosamente."}
-@router.get("/profile")
-async def get_user_profile(email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
-    user = await db.users.find_one({"email": email}, {"password": 0})
+
+@user_config_router.get("/profile")
+async def get_user_profile(email: str):
+    user = await users_collection.find_one({"email": email}, {"password": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
     user["_id"] = str(user["_id"])
     return user
+
+# Registrar el router al final absoluto de todo
+
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
-app.include_router(user_router)
+app.include_router(user_config_router)
+
 app.include_router(router)
 
