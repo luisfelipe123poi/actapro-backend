@@ -2490,7 +2490,9 @@ async def update_password(payload: UpdatePasswordRequest):
     print(f"--> Correo recibido desde el frontend: '{payload.email}'")
 
     clean_email = payload.email.strip().lower()
-    user = await users_collection.find_one({
+    
+    # CAMBIO: Quitamos el 'await' porque users_collection es de PyMongo síncrono
+    user = users_collection.find_one({
         "email": {"$regex": f"^{clean_email}$", "$options": "i"}
     })
     
@@ -2518,7 +2520,9 @@ async def update_password(payload: UpdatePasswordRequest):
     hashed_new_password = pwd_context.hash(payload.new_password)
 
     real_email = user.get("email")
-    result = await users_collection.update_one(
+    
+    # CAMBIO: Quitamos el 'await' aquí también
+    result = users_collection.update_one(
         {"email": real_email},
         {"$set": {"password": hashed_new_password}}
     )
@@ -2533,7 +2537,8 @@ async def update_password(payload: UpdatePasswordRequest):
 
 @user_config_router.get("/profile")
 async def get_user_profile(email: str):
-    user = await users_collection.find_one({"email": email}, {"password": 0})
+    # CAMBIO: Quitamos el 'await'
+    user = users_collection.find_one({"email": email}, {"password": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
