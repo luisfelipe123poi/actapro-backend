@@ -2494,7 +2494,7 @@ class UpdatePasswordRequest(BaseModel):
     current_password: str = Field(..., description="Contraseña provisional o actual")
     new_password: str = Field(..., min_length=6, description="Nueva contraseña elegida por el usuario")
 
-@router.put("/update-password/")
+@router.put("/update-password")
 async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
     # 1. Buscar al usuario en la colección de MongoDB
     user = await db.users.find_one({"email": payload.email})
@@ -2536,7 +2536,7 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
 
     return {"success": True, "message": "Contraseña actualizada exitosamente."}
 
-@router.get("/profile/")
+@router.get("/profile")
 async def get_user_profile(email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     user = await db.users.find_one({"email": email}, {"password": 0})
     if not user:
