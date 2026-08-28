@@ -2496,12 +2496,19 @@ class UpdatePasswordRequest(BaseModel):
 
 @router.put("/update-password")
 async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
-    # 1. Buscar al usuario en la colección de MongoDB
-    user = await db.users.find_one({"email": payload.email})
+    print(f"--> Correo recibido desde el frontend: '{payload.email}'")
+
+    # 1. Buscar al usuario en la colección de MongoDB (con búsqueda insensible a mayúsculas/minúsculas y espacios)
+    clean_email = payload.email.strip().lower()
+    user = await db.users.find_one({
+        "email": {"$regex": f"^{clean_email}$", "$options": "i"}
+    })
+    
     if not user:
+        print(f"--> El correo '{clean_email}' NO existe en la colección 'users'")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario no encontrado."
+            detail=f"Usuario no encontrado con el correo: {payload.email}"
         )
 
     # 2. Verificar la contraseña actual (soporta texto plano y hash de bcrypt)
@@ -2522,9 +2529,10 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
     # 3. Encriptar la nueva contraseña
     hashed_new_password = pwd_context.hash(payload.new_password)
 
-    # 4. Actualizar en la base de datos
+    # 4. Actualizar en la base de datos usando el correo real encontrado
+    real_email = user.get("email")
     result = await db.users.update_one(
-        {"email": payload.email},
+        {"email": real_email},
         {"$set": {"password": hashed_new_password}}
     )
 
@@ -2535,7 +2543,6 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
         )
 
     return {"success": True, "message": "Contraseña actualizada exitosamente."}
-
 @router.get("/profile")
 async def get_user_profile(email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     user = await db.users.find_one({"email": email}, {"password": 0})
