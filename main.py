@@ -2479,15 +2479,14 @@ import os
 # Configuración de la conexión a MongoDB
 MONGO_DETAILS = os.getenv("MONGO_URI", "tu_uri_de_mongo_aqui")
 client = AsyncIOMotorClient(MONGO_DETAILS)
-database = client.actapro_core  # Nombre de tu base de datos
+database = client.actapro_core
 
-# Definición de get_db para inyección de dependencias
+# Dependencia de base de datos
 async def get_db() -> AsyncIOMotorDatabase:
     return database
 
 router = APIRouter(prefix="/api/user", tags=["User Configuration"])
 
-# Configuración de encriptación de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class UpdatePasswordRequest(BaseModel):
@@ -2495,7 +2494,7 @@ class UpdatePasswordRequest(BaseModel):
     current_password: str = Field(..., description="Contraseña provisional o actual")
     new_password: str = Field(..., min_length=6, description="Nueva contraseña elegida por el usuario")
 
-@router.put("/update-password")
+@router.put("/update-password/")
 async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
     # 1. Buscar al usuario en la colección de MongoDB
     user = await db.users.find_one({"email": payload.email})
@@ -2537,7 +2536,7 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
 
     return {"success": True, "message": "Contraseña actualizada exitosamente."}
 
-@router.get("/profile")
+@router.get("/profile/")
 async def get_user_profile(email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     user = await db.users.find_one({"email": email}, {"password": 0})
     if not user:
