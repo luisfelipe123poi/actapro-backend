@@ -136,21 +136,21 @@ PROMPT_SISTEMA_ACTAS = """Eres un Secretario Jurídico experto en Propiedad Hori
 PRECIOS_PLANES = {
     "basico": {
         "nombre": "Plan Básico",
-        "precio": 153000.0,
+        "precio": 4000.0,
         "tokens_mensuales": 100000,
         "documentos_estimados": 40,
         "limite_horas": 15.0
     },
     "profesional": {
         "nombre": "Plan Intermedio",
-        "precio": 479000.0,
+        "precio": 4000.0,
         "tokens_mensuales": 300000,
         "documentos_estimados": 120,
         "limite_horas": 60.0,
     },
     "corporativo": {
         "nombre": "Plan Profesional / Pro",
-        "precio": 939000.0,
+        "precio": 4000.0,
         "tokens_mensuales": 1000000,
         "documentos_estimados": 400,
         "limite_horas": 200.0,
