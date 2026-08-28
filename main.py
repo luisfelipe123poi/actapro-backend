@@ -2471,9 +2471,8 @@ def eliminar_mensaje_soporte(msg_id: str):
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-import bcrypt
 
 user_config_router = APIRouter(prefix="/api/user", tags=["User Configuration"])
 
@@ -2501,19 +2500,8 @@ def update_password(payload: UpdatePasswordRequest):
 
     stored_password = user.get("password", "")
     
-    # Verificación directa y segura con bcrypt nativo
-    is_valid = False
-    try:
-        if stored_password.startswith("$2b$") or stored_password.startswith("$2a$"):
-            is_valid = bcrypt.checkpw(
-                payload.current_password.encode('utf-8'), 
-                stored_password.encode('utf-8')
-            )
-        else:
-            is_valid = (payload.current_password == stored_password)
-    except Exception as e:
-        print(f"Error al verificar contraseña: {e}")
-        is_valid = (payload.current_password == stored_password)
+    # Verificación directa en texto plano
+    is_valid = (payload.current_password == stored_password)
 
     if not is_valid:
         raise HTTPException(
@@ -2521,15 +2509,12 @@ def update_password(payload: UpdatePasswordRequest):
             detail="La contraseña actual o provisional es incorrecta."
         )
 
-    # Hashear la nueva contraseña con bcrypt nativo
-    salt = bcrypt.gensalt()
-    hashed_bytes = bcrypt.hashpw(payload.new_password.encode('utf-8'), salt)
-    hashed_new_password = hashed_bytes.decode('utf-8')
-
     real_email = user.get("email")
+    
+    # Guardar la nueva contraseña directamente en texto plano
     result = users_collection.update_one(
         {"email": real_email},
-        {"$set": {"password": hashed_new_password}}
+        {"$set": {"password": payload.new_password}}
     )
 
     if result.modified_count == 0:
