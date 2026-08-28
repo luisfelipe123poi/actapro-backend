@@ -2469,6 +2469,67 @@ def eliminar_mensaje_soporte(msg_id: str):
         print(f"DEBUG ERROR DELETE: {str(e)}")
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from passlib.context import CryptContext
+
+router = APIRouter(prefix="/api/user", tags=["User Configuration"])
+
+# Configuración de encriptación de contraseñas
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class UpdatePasswordRequest(BaseModel):
+    email: str = Field(..., description="Correo electrónico del usuario")
+    current_password: str = Field(..., description="Contraseña provisional o actual")
+    new_password: str = Field(..., min_length=6, description="Nueva contraseña elegida por el usuario")
+
+@router.put("/update-password")
+async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
+    # 1. Buscar al usuario en la colección de MongoDB
+    user = await db.users.find_one({"email": payload.email})
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado."
+        )
+
+    # 2. Verificar la contraseña actual. 
+    # (Nota: Si tus contraseñas antiguas están en texto plano como "QWEEWQ@", 
+    # puedes hacer una validación doble por migración o asegurar que coincida).
+    stored_password = user.get("password")
+    
+    is_valid = False
+    # Verificamos si la contraseña almacenada usa hash o texto plano temporal
+    if stored_password.startswith("$2b$") or stored_password.startswith("$2a$"):
+        is_valid = pwd_context.verify(payload.current_password, stored_password)
+    else:
+        # Validación para cuando la contraseña provisional es texto plano
+        is_valid = (payload.current_password == stored_password)
+
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña actual o provisional es incorrecta."
+        )
+
+    # 3. Encriptar la nueva contraseña
+    hashed_new_password = pwd_context.hash(payload.new_password)
+
+    # 4. Actualizar en la base de datos
+    result = await db.users.update_one(
+        {"email": payload.email},
+        {"$set": {"password": hashed_new_password}}
+    )
+
+    if result.modified_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo actualizar la contraseña. Inténtalo de nuevo."
+        )
+
+    return {"success": True, "message": "Contraseña actualizada exitosamente."}
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
