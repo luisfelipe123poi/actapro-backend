@@ -2530,6 +2530,16 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
         )
 
     return {"success": True, "message": "Contraseña actualizada exitosamente."}
+
+@router.get("/profile")
+async def get_user_profile(email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    user = await db.users.find_one({"email": email}, {"password": 0}) # Excluimos la contraseña por seguridad
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Convertir ObjectId a string para evitar errores de serialización JSON
+    user["_id"] = str(user["_id"])
+    return user
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
