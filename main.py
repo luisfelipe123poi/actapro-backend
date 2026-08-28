@@ -2473,12 +2473,9 @@ def eliminar_mensaje_soporte(msg_id: str):
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from motor.motor_asyncio import AsyncIOMotorDatabase
-from passlib.context import CryptContext
+import bcrypt
 
 user_config_router = APIRouter(prefix="/api/user", tags=["User Configuration"])
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class UpdatePasswordRequest(BaseModel):
     email: str = Field(..., description="Correo electrónico del usuario")
@@ -2491,7 +2488,6 @@ def update_password(payload: UpdatePasswordRequest):
 
     clean_email = payload.email.strip().lower()
     
-    # Búsqueda síncrona directa con PyMongo
     user = users_collection.find_one({
         "email": {"$regex": f"^{clean_email}$", "$options": "i"}
     })
@@ -2505,10 +2501,18 @@ def update_password(payload: UpdatePasswordRequest):
 
     stored_password = user.get("password", "")
     
+    # Verificación directa y segura con bcrypt nativo
     is_valid = False
-    if stored_password.startswith("$2b$") or stored_password.startswith("$2a$"):
-        is_valid = pwd_context.verify(payload.current_password, stored_password)
-    else:
+    try:
+        if stored_password.startswith("$2b$") or stored_password.startswith("$2a$"):
+            is_valid = bcrypt.checkpw(
+                payload.current_password.encode('utf-8'), 
+                stored_password.encode('utf-8')
+            )
+        else:
+            is_valid = (payload.current_password == stored_password)
+    except Exception as e:
+        print(f"Error al verificar contraseña: {e}")
         is_valid = (payload.current_password == stored_password)
 
     if not is_valid:
@@ -2517,11 +2521,12 @@ def update_password(payload: UpdatePasswordRequest):
             detail="La contraseña actual o provisional es incorrecta."
         )
 
-    hashed_new_password = pwd_context.hash(payload.new_password)
+    # Hashear la nueva contraseña con bcrypt nativo
+    salt = bcrypt.gensalt()
+    hashed_bytes = bcrypt.hashpw(payload.new_password.encode('utf-8'), salt)
+    hashed_new_password = hashed_bytes.decode('utf-8')
 
     real_email = user.get("email")
-    
-    # Actualización síncrona directa con PyMongo
     result = users_collection.update_one(
         {"email": real_email},
         {"$set": {"password": hashed_new_password}}
@@ -2544,7 +2549,7 @@ def get_user_profile(email: str):
     user["_id"] = str(user["_id"])
     return user
 
-# Registrar el router al final absoluto de todo
+
 
     
 # 2. Incluirlo en la aplicación principal al final de todo
