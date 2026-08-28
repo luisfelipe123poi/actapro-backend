@@ -29,6 +29,7 @@ import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 from sib_api_v3_sdk.models import SendSmtpEmail, SendSmtpEmailSender, SendSmtpEmailTo
 from tasks import task_procesar_asamblea
+from user_routes import router as user_router
 
 load_dotenv()
 
