@@ -2547,4 +2547,5 @@ async def get_user_profile(email: str, db: AsyncIOMotorDatabase = Depends(get_db
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
+app.include_router(router)
 
