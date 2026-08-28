@@ -2472,8 +2472,18 @@ def eliminar_mensaje_soporte(msg_id: str):
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorClient
 from passlib.context import CryptContext
+import os
+
+# Configuración de la conexión a MongoDB
+MONGO_DETAILS = os.getenv("MONGO_URI", "tu_uri_de_mongo_aqui")
+client = AsyncIOMotorClient(MONGO_DETAILS)
+database = client.actapro_core  # Nombre de tu base de datos
+
+# Definición de get_db para inyección de dependencias
+async def get_db() -> AsyncIOMotorDatabase:
+    return database
 
 router = APIRouter(prefix="/api/user", tags=["User Configuration"])
 
@@ -2495,17 +2505,13 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
             detail="Usuario no encontrado."
         )
 
-    # 2. Verificar la contraseña actual. 
-    # (Nota: Si tus contraseñas antiguas están en texto plano como "QWEEWQ@", 
-    # puedes hacer una validación doble por migración o asegurar que coincida).
-    stored_password = user.get("password")
+    # 2. Verificar la contraseña actual (soporta texto plano y hash de bcrypt)
+    stored_password = user.get("password", "")
     
     is_valid = False
-    # Verificamos si la contraseña almacenada usa hash o texto plano temporal
     if stored_password.startswith("$2b$") or stored_password.startswith("$2a$"):
         is_valid = pwd_context.verify(payload.current_password, stored_password)
     else:
-        # Validación para cuando la contraseña provisional es texto plano
         is_valid = (payload.current_password == stored_password)
 
     if not is_valid:
@@ -2531,7 +2537,14 @@ async def update_password(payload: UpdatePasswordRequest, db: AsyncIOMotorDataba
 
     return {"success": True, "message": "Contraseña actualizada exitosamente."}
 
-
+@router.get("/profile")
+async def get_user_profile(email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    user = await db.users.find_one({"email": email}, {"password": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    user["_id"] = str(user["_id"])
+    return user
     
 # 2. Incluirlo en la aplicación principal al final de todo
 app.include_router(crm_router)
