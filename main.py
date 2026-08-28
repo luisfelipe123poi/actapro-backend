@@ -1683,9 +1683,9 @@ router = APIRouter(prefix="/api/crm", tags=["CRM & SaaS Analytics"])
 # mp_sdk = mercadopago.SDK("YOUR_ACCESS_TOKEN")
 
 PRECIOS_PLANES = {
-    "basico": {"tokens_mensuales": 100000, "limite_horas": 15.0, "precio": 153000},
-    "profesional": {"tokens_mensuales": 500000, "limite_horas": 60.0, "precio": 479000},
-    "corporativo": {"tokens_mensuales": 2000000, "limite_horas": 200.0, "precio": 939000}
+    "basico": {"tokens_mensuales": 100000, "limite_horas": 15.0, "precio": 4000},
+    "profesional": {"tokens_mensuales": 500000, "limite_horas": 60.0, "precio": 4000},
+    "corporativo": {"tokens_mensuales": 2000000, "limite_horas": 200.0, "precio": 4000}
 }
 
 @router.get("/license-stats-advanced")
@@ -1705,7 +1705,7 @@ async def obtener_estadisticas_avanzadas():
             "horas_usadas_mes": 185.0,
             "limite_horas_mes": 200,
             "tokens_usados": 1250000,
-            "pago_mensual": 939000,
+            "pago_mensual": 4000,
             "activo": True
         },
         {
@@ -1715,7 +1715,7 @@ async def obtener_estadisticas_avanzadas():
             "horas_usadas_mes": 5.0, # Uso muy bajo -> Alerta de Churn
             "limite_horas_mes": 60,
             "tokens_usados": 45000,
-            "pago_mensual": 479000,
+            "pago_mensual": 4000,
             "activo": True
         },
         {
@@ -1725,7 +1725,7 @@ async def obtener_estadisticas_avanzadas():
             "horas_usadas_mes": 14.5,
             "limite_horas_mes": 15,
             "tokens_usados": 110000,
-            "pago_mensual": 153000,
+            "pago_mensual": 4000,
             "activo": True
         }
     ]
@@ -1791,9 +1791,9 @@ async def descargar_factura_pdf(email: str):
             "cliente": email,
             "fecha_emision": datetime.now().strftime("%Y-%m-%d"),
             "concepto": "Suscripción Licencia Corporativa - Mensual",
-            "valor_neto": 939000,
+            "valor_neto": 4000,
             "iva": 0,
-            "total": 939000,
+            "total": 4000,
             "estado": "Pagado vía Mercado Pago"
         }
     }
