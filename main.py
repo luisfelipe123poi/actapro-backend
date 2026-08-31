@@ -2572,7 +2572,6 @@ class RequestOTPRequest(BaseModel):
 # Modelo para Verificar OTP y Cambiar Contraseña
 class VerifyOTPRequest(BaseModel):
     email: str = Field(..., description="Correo electrónico del usuario")
-    current_password: str = Field(..., description="Contraseña provisional o actual")
     new_password: str = Field(..., min_length=6, description="Nueva contraseña elegida por el usuario")
     otp_code: str = Field(..., min_length=6, max_length=6, description="Código de 6 dígitos enviado al correo")
 
@@ -2637,7 +2636,7 @@ def request_password_otp(payload: RequestOTPRequest):
 def verify_password_otp(payload: VerifyOTPRequest):
     clean_email = payload.email.strip().lower()
 
-    # Buscar usuario en MongoDB
+    # 1. Buscar usuario
     user = users_collection.find_one({
         "email": {"$regex": f"^{clean_email}$", "$options": "i"}
     })
@@ -2648,37 +2647,40 @@ def verify_password_otp(payload: VerifyOTPRequest):
             detail=f"Usuario no encontrado con el correo: {payload.email}"
         )
 
-    # Verificar datos de OTP guardados
+    # 2. VALIDACIÓN CLAVE DE AUTENTICACIÓN POR CORREO:
+    # Verificar si generó un código previamente en /request-password-otp
     otp_data = user.get("password_reset_otp")
-    if not otp_data:
+    if not otp_data or "code" not in otp_data:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No se ha solicitado ningún código de verificación o este expiró."
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado. Primero debes solicitar un código de verificación enviado a tu correo."
         )
 
     saved_code = otp_data.get("code")
     expires_at = otp_data.get("expires_at")
 
-    # Validar coincidencia del código
+    # 3. Validar si el código expiró (10 minutos)
+    if datetime.utcnow() > expires_at:
+        # Limpiar código vencido
+        users_collection.update_one({"_id": user["_id"]}, {"$unset": {"password_reset_otp": ""}})
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El código de verificación ha expirado. Solicita uno nuevo."
+        )
+
+    # 4. Validar que el código del correo coincida exactamente
     if payload.otp_code.strip() != saved_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El código de verificación es incorrecto."
         )
 
-    # Validar expiración del código
-    if datetime.utcnow() > expires_at:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El código ha expirado. Solicita uno nuevo."
-        )
-
-    # Actualizar la contraseña y eliminar el OTP usado
+    # 5. Cambiar contraseña y destruir el OTP usado para que no se reutilice
     result = users_collection.update_one(
         {"_id": user["_id"]},
         {
             "$set": {"password": payload.new_password},
-            "$unset": {"password_reset_otp": ""}
+            "$unset": {"password_reset_otp": ""}  # Quita la autorización
         }
     )
 
@@ -2688,7 +2690,7 @@ def verify_password_otp(payload: VerifyOTPRequest):
             detail="No se pudo actualizar la contraseña. Inténtalo de nuevo."
         )
 
-    return {"success": True, "message": "¡Contraseña actualizada exitosamente!"}    
+    return {"success": True, "message": "¡Contraseña actualizada exitosamente!"}
     
 # 2. Incluirlo en la aplicación principal al final de todo
 
