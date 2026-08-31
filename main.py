@@ -4,6 +4,8 @@ import os
 import re
 import shutil
 import uuid
+import secrets
+import string
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel
@@ -193,6 +195,14 @@ class ConsultaFAQRequest(BaseModel):
 class ConsultaPlanRequest(BaseModel):
     clienteId: str
     tipoProblema: Optional[str] = None
+
+
+def generar_password_temporal(longitud=8):
+    # Genera una contraseña aleatoria de 8 caracteres (letras y números)
+    caracteres = string.ascii_letters + string.digits
+    return "".join(secrets.choice(caracteres) for _ in range(longitud))
+
+
 # ==========================================
 # 4. Función Auxiliar para Enviar Correos con Brevo
 # ==========================================
@@ -560,7 +570,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
     if not user:
         users_collection.insert_one({
             "email": email_cliente,
-            "password": "temp_password_temporal",
+            "password": generar_password_temporal(),
             "plan": "free",
             "tokens_usados": 0,
             "limite_tokens_mes": 0,
@@ -689,12 +699,12 @@ async def webhook_mercadopago(request: Request):
                         user_existente = users_collection.find_one({"email": payer_email})
                         es_nuevo = False
 
-                        if user_existente and user_existente.get("password") != "temp_password_temporal":
-                            # Usuario antiguo con contraseña registrada
+                        if user_existente and user_existente.get("password"):
+                            # Usuario ya existente en la base de datos
                             password_temporal = "Tu contraseña actual registrada"
                         else:
-                            # Usuario nuevo o que fue pre-creado en la preferencia de pago
-                            password_temporal = "temp_password_temporal"
+                            # Usuario nuevo que no existía previamente
+                            password_temporal = generar_password_temporal()
                             es_nuevo = True
 
                         # Actualizar o insertar en MongoDB
@@ -711,7 +721,7 @@ async def webhook_mercadopago(request: Request):
                                 },
                                 "$setOnInsert": {
                                     "email": payer_email,
-                                    "password": "temp_password_temporal",
+                                    "password": password_temporal,
                                 }
                             },
                             upsert=True
