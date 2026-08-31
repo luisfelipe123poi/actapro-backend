@@ -197,7 +197,7 @@ class ConsultaPlanRequest(BaseModel):
     tipoProblema: Optional[str] = None
 
 
-def generar_password_temporal(longitud=6):
+def generar_password_temporal(longitud=8):
     # Genera una contraseña aleatoria de 8 caracteres (letras y números)
     caracteres = string.ascii_letters + string.digits
     return "".join(secrets.choice(caracteres) for _ in range(longitud))
@@ -2558,60 +2558,144 @@ def get_user_profile(email: str):
     return user
 
 
+import random
+import string
+from datetime import datetime, timedelta
+from pydantic import BaseModel, Field, EmailStr
+from fastapi import HTTPException, status
 
+# Modelo para Solicitar OTP
+class RequestOTPRequest(BaseModel):
+    email: str = Field(..., description="Correo electrónico del usuario")
+    current_password: str = Field(..., description="Contraseña provisional o actual")
+
+# Modelo para Verificar OTP y Cambiar Contraseña
+class VerifyOTPRequest(BaseModel):
+    email: str = Field(..., description="Correo electrónico del usuario")
+    current_password: str = Field(..., description="Contraseña provisional o actual")
+    new_password: str = Field(..., min_length=6, description="Nueva contraseña elegida por el usuario")
+    otp_code: str = Field(..., min_length=6, max_length=6, description="Código de 6 dígitos enviado al correo")
+
+# Función auxiliar para enviar el correo (adapta esto a tu servicio de SMTP o servicio de mailing)
+def send_otp_email(to_email: str, code: str):
+    # TODO: Integra aquí tu función de envío de correos (Resend, SendGrid, SMTP de Gmail, etc.)
+    print(f"--> [ENVIANDO EMAIL] Código OTP '{code}' enviado a: {to_email}")
+
+
+# ----------------------------------------------------------------------
+# 1. PASO 1: Solicitar Código OTP
+# ----------------------------------------------------------------------
+@user_config_router.post("/request-password-otp")
+def request_password_otp(payload: RequestOTPRequest):
+    clean_email = payload.email.strip().lower()
+    
+    # Buscar usuario en MongoDB
+    user = users_collection.find_one({
+        "email": {"$regex": f"^{clean_email}$", "$options": "i"}
+    })
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Usuario no encontrado con el correo: {payload.email}"
+        )
+
+    # Validar contraseña actual
+    stored_password = user.get("password", "")
+    if payload.current_password != stored_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña actual o provisional es incorrecta."
+        )
+
+    # Generar código OTP de 6 dígitos y expiración en 10 minutos
+    otp_code = "".join(random.choices(string.digits, k=6))
+    expires_at = datetime.utcnow() + timedelta(minutes=10)
+
+    # Guardar o actualizar el código OTP directamente en el documento del usuario en MongoDB
+    users_collection.update_one(
+        {"_id": user["_id"]},
+        {"$set": {
+            "password_reset_otp": {
+                "code": otp_code,
+                "expires_at": expires_at
+            }
+        }}
+    )
+
+    # Enviar correo con el código OTP
+    real_email = user.get("email")
+    send_otp_email(real_email, otp_code)
+
+    return {"success": True, "message": "Código de verificación enviado al correo."}
+
+
+# ----------------------------------------------------------------------
+# 2. PASO 2: Verificar Código OTP y Cambiar Contraseña
+# ----------------------------------------------------------------------
+@user_config_router.put("/verify-password-otp")
+def verify_password_otp(payload: VerifyOTPRequest):
+    clean_email = payload.email.strip().lower()
+
+    # Buscar usuario en MongoDB
+    user = users_collection.find_one({
+        "email": {"$regex": f"^{clean_email}$", "$options": "i"}
+    })
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Usuario no encontrado con el correo: {payload.email}"
+        )
+
+    # Verificar datos de OTP guardados
+    otp_data = user.get("password_reset_otp")
+    if not otp_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se ha solicitado ningún código de verificación o este expiró."
+        )
+
+    saved_code = otp_data.get("code")
+    expires_at = otp_data.get("expires_at")
+
+    # Validar coincidencia del código
+    if payload.otp_code.strip() != saved_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El código de verificación es incorrecto."
+        )
+
+    # Validar expiración del código
+    if datetime.utcnow() > expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El código ha expirado. Solicita uno nuevo."
+        )
+
+    # Actualizar la contraseña y eliminar el OTP usado
+    result = users_collection.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {"password": payload.new_password},
+            "$unset": {"password_reset_otp": ""}
+        }
+    )
+
+    if result.modified_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo actualizar la contraseña. Inténtalo de nuevo."
+        )
+
+    return {"success": True, "message": "¡Contraseña actualizada exitosamente!"}    
     
 # 2. Incluirlo en la aplicación principal al final de todo
+
 app.include_router(crm_router)
 app.include_router(user_config_router)
 
 app.include_router(router)
 
-@app.post("/api/test-activacion")
-async def test_activacion(email: str, plan: str):
-    """
-    Endpoint temporal de pruebas para simular activaciones/upgrades de plan.
-    """
-    payer_email = email.strip().lower()
-    info_plan = PRECIOS_PLANES.get(plan, PRECIOS_PLANES["basico"])
-    
-    tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
-    horas_otorgadas = info_plan.get("limite_horas", 15.0)
-    precio_pagado = info_plan.get("precio", 0.0)
-    nombre_plan_fmt = info_plan.get("nombre", plan.capitalize())
 
-    # Buscar si existe
-    user_existente = users_collection.find_one({"email": payer_email})
-    es_nuevo = not bool(user_existente)
-
-    password_temporal = "Tu contraseña actual registrada" if not es_nuevo else "temp_password_temporal"
-
-    # Actualizar DB
-    users_collection.update_one(
-        {"email": payer_email},
-        {
-            "$set": {
-                "plan": plan,
-                "tokens_usados": 0,
-                "limite_tokens_mes": tokens_otorgados,
-                "horas_usadas_mes": 0.0,
-                "horas_restantes": horas_otorgadas,
-                "limite_horas_mes": horas_otorgadas,
-            },
-            "$setOnInsert": {
-                "email": payer_email,
-                "password": "temp_password_temporal",
-            }
-        },
-        upsert=True
-    )
-
-    # Correo
-    asunto = f"¡Bienvenido! Licencia {nombre_plan_fmt}" if es_nuevo else f"¡Actualización! Plan {nombre_plan_fmt}"
-    mensaje = "Registro de prueba exitoso." if es_nuevo else "Upgrade de prueba exitoso."
-    
-    html_cuerpo = f"<h1>Prueba para {payer_email}</h1><p>{mensaje}</p><p>Clave: {password_temporal}</p>"
-    
-    enviar_correo_brevo(payer_email, payer_email.split("@")[0], asunto, html_cuerpo)
-
-    return {"status": "ok", "es_nuevo": es_nuevo, "plan": plan}
 
