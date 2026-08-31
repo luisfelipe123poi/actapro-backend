@@ -2580,12 +2580,80 @@ def send_otp_email(to_email: str, code: str):
     # TODO: Integra aquí tu función de envío de correos (Resend, SendGrid, SMTP de Gmail, etc.)
     print(f"--> [ENVIANDO EMAIL] Código OTP '{code}' enviado a: {to_email}")
 
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
 
+# Configuración del servidor SMTP (puedes cargarlas desde variables de entorno .env)
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_USER = os.getenv("SMTP_USER", "tu_correo@gmail.com")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "tu_contraseña_de_aplicacion")
+
+def send_otp_email(to_email: str, otp_code: str):
+    """
+    Envía un correo con el código OTP de 6 dígitos mediante SMTP.
+    """
+    subject = "Código de verificación para cambio de contraseña - ActaProCore"
+    
+    # Plantilla HTML del correo
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+    </head>
+    <body style="font-family: Arial, sans-serif; background-color: #f8fafc; padding: 20px;">
+        <div style="max-width: 500px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0;">
+            <h2 style="color: #0f172a; margin-top: 0;">ActaProCore</h2>
+            <p style="color: #475569; font-size: 14px;">Hemos recibido una solicitud para cambiar tu contraseña. Usa el siguiente código de verificación:</p>
+            
+            <div style="text-align: center; margin: 25px 0;">
+                <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #2563eb; background-color: #eff6ff; padding: 12px 24px; border-radius: 8px; border: 1px solid #bfdbfe;">
+                    {otp_code}
+                </span>
+            </div>
+            
+            <p style="color: #64748b; font-size: 12px;">Este código expirará en <strong>10 minutos</strong>. Si no solicitaste este cambio, puedes ignorar este correo de forma segura.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+    # Creación del mensaje
+    message = MIMEMultipart("alternative")
+    message["Subject"] = subject
+    message["From"] = f"ActaProCore <{SMTP_USER}>"
+    message["To"] = to_email
+
+    # Adjuntar versión HTML
+    part_html = MIMEText(html_content, "html")
+    message.attach(part_html)
+
+    # Envío mediante SMTP TLS
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, to_email, message.as_string())
+    except Exception as e:
+        print(f"Error al enviar el correo OTP: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error al enviar el correo con el código de verificación."
+        )
+        
 # ----------------------------------------------------------------------
 # 1. PASO 1: Solicitar Código OTP
 # ----------------------------------------------------------------------
+from datetime import datetime, timedelta, timezone
+import random
+import string
+from fastapi import BackgroundTasks, HTTPException, status
+
 @user_config_router.post("/request-password-otp")
-def request_password_otp(payload: RequestOTPRequest):
+def request_password_otp(payload: RequestOTPRequest, background_tasks: BackgroundTasks):
     clean_email = payload.email.strip().lower()
     
     # Buscar usuario en MongoDB
@@ -2609,9 +2677,9 @@ def request_password_otp(payload: RequestOTPRequest):
 
     # Generar código OTP de 6 dígitos y expiración en 10 minutos
     otp_code = "".join(random.choices(string.digits, k=6))
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
 
-    # Guardar o actualizar el código OTP directamente en el documento del usuario en MongoDB
+    # Guardar en MongoDB
     users_collection.update_one(
         {"_id": user["_id"]},
         {"$set": {
@@ -2622,12 +2690,11 @@ def request_password_otp(payload: RequestOTPRequest):
         }}
     )
 
-    # Enviar correo con el código OTP
+    # Enviar correo en SEGUNDO PLANO
     real_email = user.get("email")
-    send_otp_email(real_email, otp_code)
+    background_tasks.add_task(send_otp_email, real_email, otp_code)
 
     return {"success": True, "message": "Código de verificación enviado al correo."}
-
 
 # ----------------------------------------------------------------------
 # 2. PASO 2: Verificar Código OTP y Cambiar Contraseña
