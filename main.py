@@ -685,6 +685,19 @@ async def webhook_mercadopago(request: Request):
                         precio_pagado = info_plan.get("precio", 0.0)
                         nombre_plan_fmt = info_plan.get("nombre", plan_asignado.capitalize())
 
+                        # --- VERIFICACIÓN DE USUARIO EXISTENTE VS NUEVO ---
+                        user_existente = users_collection.find_one({"email": payer_email})
+                        es_nuevo = False
+
+                        if user_existente and user_existente.get("password") != "temp_password_temporal":
+                            # Usuario antiguo con contraseña registrada
+                            password_temporal = "Tu contraseña actual registrada"
+                        else:
+                            # Usuario nuevo o que fue pre-creado en la preferencia de pago
+                            password_temporal = "temp_password_temporal"
+                            es_nuevo = True
+
+                        # Actualizar o insertar en MongoDB
                         users_collection.update_one(
                             {"email": payer_email},
                             {
@@ -695,15 +708,25 @@ async def webhook_mercadopago(request: Request):
                                     "horas_usadas_mes": 0.0,
                                     "horas_restantes": horas_otorgadas,
                                     "limite_horas_mes": horas_otorgadas,
+                                },
+                                "$setOnInsert": {
+                                    "email": payer_email,
+                                    "password": "temp_password_temporal",
                                 }
                             },
                             upsert=True
                         )
 
-                        # Formateo correcto de variables dinámicas en el correo HTML
+                        # Configurar mensaje dinámico según si es actualización o cuenta nueva
                         nombre_usuario = payer_email.split("@")[0].capitalize()
-                        asunto_correo = f"¡Compra exitosa! Licencia {nombre_plan_fmt} Activada"
                         
+                        if es_nuevo:
+                            asunto_correo = f"¡Bienvenido! Licencia {nombre_plan_fmt} Activada"
+                            mensaje_bienvenida = "Te confirmamos que tu pago ha sido procesado exitosamente y tu suscripción ya se encuentra activa en nuestro sistema."
+                        else:
+                            asunto_correo = f"¡Actualización Exitosa! Tu Plan cambió a {nombre_plan_fmt}"
+                            mensaje_bienvenida = f"Tu cuenta ha sido actualizada exitosamente al <strong>Plan {nombre_plan_fmt}</strong>. Tus nuevos límites de horas y tokens ya están disponibles."
+
                         html_cuerpo = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -715,15 +738,12 @@ async def webhook_mercadopago(request: Request):
     <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="padding: 30px 0; background-color: #f8fafc;">
         <tr>
             <td align="center">
-                <!-- Contenedor Principal -->
                 <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-                    <!-- Cabecera -->
                     <tr>
                         <td align="left" style="background: #ffffff; padding: 25px 30px; border-bottom: 3px solid #10b981;">
                             <table width="100%" border="0" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td>
-                                        <!-- PEGA TU LINK AQUÍ -->
                                         <img src="https://res.cloudinary.com/iuu7h8rj/image/upload/v1787944318/1.png" alt="ActaPro Core" width="130" style="display: block; border: 0; outline: none; text-decoration: none; max-width: 130px; height: auto;">
                                     </td>
                                     <td align="right" style="color: #64748b; font-size: 12px;">
@@ -734,19 +754,17 @@ async def webhook_mercadopago(request: Request):
                         </td>
                     </tr>
                     
-                    <!-- Cuerpo del Contenido -->
                     <tr>
                         <td style="padding: 35px 30px;">
                             <h2 style="color: #0f172a; font-size: 20px; margin-top: 0; margin-bottom: 15px;">Hola, {nombre_usuario}</h2>
                             <p style="color: #334155; font-size: 15px; line-height: 1.6; margin-top: 0; margin-bottom: 20px;">
-                                Te confirmamos que tu pago ha sido procesado exitosamente y tu suscripción ya se encuentra activa en nuestro sistema. A continuación, te compartimos los detalles de tu cuenta y los beneficios acreditados.
+                                {mensaje_bienvenida}
                             </p>
 
-                            <!-- Bloque de Credenciales de Acceso -->
                             <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; margin-bottom: 25px;">
                                 <tr>
                                     <td style="padding: 20px;">
-                                        <p style="color: #166534; font-size: 14px; font-weight: 700; margin: 0 0 10px 0;">Tus credenciales de acceso temporal:</p>
+                                        <p style="color: #166534; font-size: 14px; font-weight: 700; margin: 0 0 10px 0;">Datos de acceso:</p>
                                         <table width="100%" border="0" cellpadding="4" cellspacing="0">
                                             <tr>
                                                 <td style="color: #334155; font-size: 14px; width: 90px;"><strong>Correo:</strong></td>
@@ -757,12 +775,10 @@ async def webhook_mercadopago(request: Request):
                                                 <td style="color: #0f172a; font-size: 14px; font-family: monospace; background: #ffffff; padding: 4px 8px; border-radius: 4px; border: 1px solid #d1fae5;">{password_temporal}</td>
                                             </tr>
                                         </table>
-                                        <p style="color: #15803d; font-size: 12px; margin: 10px 0 0 0;">* Te recomendamos iniciar sesión y cambiar tu contraseña por seguridad desde la configuración de tu perfil.</p>
                                     </td>
                                 </tr>
                             </table>
 
-                            <!-- Resumen del Plan -->
                             <p style="color: #64748b; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 10px 0;">Detalles de la Suscripción</p>
                             <table width="100%" border="0" cellpadding="10" cellspacing="0" style="background-color: #f8fafc; border-radius: 8px; margin-bottom: 25px; border: 1px solid #e2e8f0;">
                                 <tr>
@@ -783,11 +799,10 @@ async def webhook_mercadopago(request: Request):
                                 </tr>
                             </table>
 
-                            <!-- Botón de Acción Principal -->
                             <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom: 30px;">
                                 <tr>
                                     <td align="center">
-                                        <a href="https://actaprocore.com/dashboard" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 14px 30px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">Iniciar Sesión en mi Panel</a>
+                                        <a href="https://actaprocore.com/dashboard" target="_blank" style="background-color: #2563eb; color: #ffffff; padding: 14px 30px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);">Ir a mi Panel</a>
                                     </td>
                                 </tr>
                             </table>
@@ -798,7 +813,6 @@ async def webhook_mercadopago(request: Request):
                         </td>
                     </tr>
 
-                    <!-- Pie de página con enlaces institucionales para evitar SPAM -->
                     <tr>
                         <td align="center" style="background-color: #f8fafc; padding: 20px 30px; border-top: 1px solid #e2e8f0;">
                             <p style="color: #94a3b8; font-size: 12px; margin: 0 0 10px 0; line-height: 1.4;">
@@ -825,7 +839,6 @@ async def webhook_mercadopago(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"status": "ok"}
-
 import ffmpeg
 
 # Función para validar la calidad técnica del audio en Python
@@ -2542,4 +2555,53 @@ app.include_router(crm_router)
 app.include_router(user_config_router)
 
 app.include_router(router)
+
+@app.post("/api/test-activacion")
+async def test_activacion(email: str, plan: str):
+    """
+    Endpoint temporal de pruebas para simular activaciones/upgrades de plan.
+    """
+    payer_email = email.strip().lower()
+    info_plan = PRECIOS_PLANES.get(plan, PRECIOS_PLANES["basico"])
+    
+    tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
+    horas_otorgadas = info_plan.get("limite_horas", 15.0)
+    precio_pagado = info_plan.get("precio", 0.0)
+    nombre_plan_fmt = info_plan.get("nombre", plan.capitalize())
+
+    # Buscar si existe
+    user_existente = users_collection.find_one({"email": payer_email})
+    es_nuevo = not bool(user_existente)
+
+    password_temporal = "Tu contraseña actual registrada" if not es_nuevo else "temp_password_temporal"
+
+    # Actualizar DB
+    users_collection.update_one(
+        {"email": payer_email},
+        {
+            "$set": {
+                "plan": plan,
+                "tokens_usados": 0,
+                "limite_tokens_mes": tokens_otorgados,
+                "horas_usadas_mes": 0.0,
+                "horas_restantes": horas_otorgadas,
+                "limite_horas_mes": horas_otorgadas,
+            },
+            "$setOnInsert": {
+                "email": payer_email,
+                "password": "temp_password_temporal",
+            }
+        },
+        upsert=True
+    )
+
+    # Correo
+    asunto = f"¡Bienvenido! Licencia {nombre_plan_fmt}" if es_nuevo else f"¡Actualización! Plan {nombre_plan_fmt}"
+    mensaje = "Registro de prueba exitoso." if es_nuevo else "Upgrade de prueba exitoso."
+    
+    html_cuerpo = f"<h1>Prueba para {payer_email}</h1><p>{mensaje}</p><p>Clave: {password_temporal}</p>"
+    
+    enviar_correo_brevo(payer_email, payer_email.split("@")[0], asunto, html_cuerpo)
+
+    return {"status": "ok", "es_nuevo": es_nuevo, "plan": plan}
 
