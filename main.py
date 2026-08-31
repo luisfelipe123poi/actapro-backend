@@ -197,7 +197,7 @@ class ConsultaPlanRequest(BaseModel):
     tipoProblema: Optional[str] = None
 
 
-def generar_password_temporal(longitud=8):
+def generar_password_temporal(longitud=6):
     # Genera una contraseña aleatoria de 8 caracteres (letras y números)
     caracteres = string.ascii_letters + string.digits
     return "".join(secrets.choice(caracteres) for _ in range(longitud))
