@@ -2856,7 +2856,7 @@ def forgot_password(payload: ForgotPasswordRequest):
 app.include_router(crm_router)
 app.include_router(user_config_router)
 
-app.include_router(router)
+
 
 
 
