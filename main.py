@@ -2744,11 +2744,8 @@ import secrets
 import os
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
-from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
-
-# Definición del router con su prefijo base
-router = APIRouter(prefix="/api/user", tags=["User Config"])
+from fastapi import HTTPException, status
 
 # ==========================================
 # FUNCIÓN GENERADORA DE CLAVES DINÁMICAS
@@ -2776,17 +2773,20 @@ def generar_clave_dinamica(longitud: int = 8) -> str:
 
 
 # ==========================================
-# MODELO Y ENDPOINT
+# MODELO PARA RECUPERACIÓN
 # ==========================================
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
-# Deja un solo decorador
-@router.post("/forgot-password")
+
+# ==========================================
+# ENDPOINT ADAPTADO A TU USER_CONFIG_ROUTER
+# ==========================================
+@user_config_router.post("/forgot-password")
 def forgot_password(payload: ForgotPasswordRequest):
     clean_email = payload.email.strip().lower()
     
-    # 1. MONGODB: Buscar el usuario
+    # 1. MONGODB: Buscar el usuario asegurando la misma lógica que tus otros endpoints
     user = users_collection.find_one({
         "email": {"$regex": f"^{clean_email}$", "$options": "i"}
     })
@@ -2797,16 +2797,16 @@ def forgot_password(payload: ForgotPasswordRequest):
             detail="No existe ninguna cuenta vinculada a este correo."
         )
 
-    # 2. Generar clave provisional dinámica
+    # 2. Generar clave provisional dinámica de 8 caracteres
     temp_password = generar_clave_dinamica(longitud=8)
 
-    # 3. MONGODB: Guardar la clave provisional
+    # 3. MONGODB: Guardar la clave provisional en texto plano (coherente con tu sistema actual)
     users_collection.update_one(
         {"_id": user["_id"]},
         {"$set": {"password": temp_password}}
     )
 
-    # 4. BREVO: Configuración de envío
+    # 4. BREVO: Configuración de envío de correo electrónico transaccional
     configuration = sib_api_v3_sdk.Configuration()
     configuration.api_key['api-key'] = os.getenv("BREVO_API_KEY")
 
