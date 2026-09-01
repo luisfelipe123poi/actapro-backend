@@ -2550,32 +2550,12 @@ def update_password(payload: UpdatePasswordRequest):
 
 @user_config_router.get("/profile")
 def get_user_profile(email: str):
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El parámetro email es obligatorio."
-        )
-
-    clean_email = email.strip().lower()
-
-    # Buscamos ignorando mayúsculas/minúsculas y excluyendo el campo password
-    user = users_collection.find_one(
-        {"email": {"$regex": f"^{clean_email}$", "$options": "i"}},
-        {"password": 0}
-    )
-
+    user = users_collection.find_one({"email": email}, {"password": 0})
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario no encontrado"
-        )
-
-    # Convertimos ObjectId a string para que FastAPI pueda serializarlo a JSON
-    if "_id" in user:
-        user["_id"] = str(user["_id"])
-
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    user["_id"] = str(user["_id"])
     return user
-
 
 import random
 import string
