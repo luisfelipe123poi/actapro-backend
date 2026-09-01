@@ -2772,49 +2772,7 @@ def generar_clave_dinamica(longitud: int = 8) -> str:
     return ''.join(password)
 
 
-class ForgotPasswordRequest(BaseModel):
-    email: str
 
-@app.post("/api/user/forgot-password")
-def forgot_password(data: ForgotPasswordRequest):
-    user = users_collection.find_one({"email": data.email})
-    if not user:
-        raise HTTPException(
-            status_code=404, 
-            detail="El correo electrónico no se encuentra registrado en el sistema."
-        )
-    
-    # Generar contraseña temporal utilizando la función existente
-    nueva_password = generar_password_temporal()
-    users_collection.update_one(
-        {"email": data.email},
-        {"$set": {"password": nueva_password}}
-    )
-    
-    nombre_usuario = data.email.split("@")[0].capitalize()
-    asunto = "Recuperación de Contraseña - ActaPro Core"
-    html_cuerpo = f"""
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"></head>
-    <body style="font-family: Arial, sans-serif; color: #334155;">
-        <h2>Hola, {nombre_usuario}</h2>
-        <p>Has solicitado restablecer tu contraseña en <strong>ActaPro Core</strong>.</p>
-        <p>Tu nueva contraseña temporal de acceso es:</p>
-        <p style="font-family: monospace; font-size: 16px; background: #f8fafc; padding: 12px; border: 1px solid #e2e8f0; display: inline-block;">
-            <b>{nueva_password}</b>
-        </p>
-        <p>Te recomendamos iniciar sesión y actualizar tu contraseña por seguridad.</p>
-    </body>
-    </html>
-    """
-    
-    enviar_correo_brevo(data.email, nombre_usuario, asunto, html_cuerpo)
-    
-    return {
-        "success": True,
-        "message": "Se ha enviado una contraseña temporal a tu correo electrónico."
-    }
 
 @user_config_router.get("/reset-password-direct")
 def reset_password_direct(email: str):
