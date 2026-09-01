@@ -2816,9 +2816,9 @@ def forgot_password(data: ForgotPasswordRequest):
         "message": "Se ha enviado una contraseña temporal a tu correo electrónico."
     }
 
-@user_config_router.post("/reset-password-direct")
-def reset_password_direct(payload: ForgotPasswordRequest):
-    clean_email = payload.email.strip().lower()
+@user_config_router.get("/reset-password-direct")
+def reset_password_direct(email: str):
+    clean_email = email.strip().lower()
     
     user = users_collection.find_one({
         "email": {"$regex": f"^{clean_email}$", "$options": "i"}
@@ -2830,7 +2830,6 @@ def reset_password_direct(payload: ForgotPasswordRequest):
             detail="El correo no está registrado."
         )
 
-    # Definimos una contraseña temporal estándar o un código de reseteo seguro
     password_temporal = "Cambiar123*"
     
     users_collection.update_one(
