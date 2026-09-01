@@ -2854,7 +2854,7 @@ def forgot_password(payload: ForgotPasswordRequest):
         "message": "Se ha generado una clave provisional y se envió a tu correo."
     }
 app.include_router(crm_router)
-app.include_router(user_config_router)
+app.include_router(router)
 
 
 
