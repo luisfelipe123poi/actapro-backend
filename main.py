@@ -2739,6 +2739,124 @@ def change_password(payload: ChangePasswordRequest):
     )
 
     return {"success": True, "message": "Contraseña actualizada correctamente."}
+
+import string
+import secrets
+import os
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, EmailStr
+
+# ==========================================
+# FUNCIÓN GENERADORA DE CLAVES DINÁMICAS
+# ==========================================
+def generar_clave_dinamica(longitud: int = 8) -> str:
+    """
+    Genera una contraseña provisional dinámica y segura de la longitud especificada (mínimo 6 dígitos).
+    Garantiza al menos una letra mayúscula, una minúscula y un número.
+    """
+    if longitud < 6:
+        longitud = 6
+
+    minusculas = string.ascii_lowercase
+    mayusculas = string.ascii_uppercase
+    digitos = string.digits
+    
+    # Garantizar diversidad en los primeros caracteres
+    password = [
+        secrets.choice(minusculas),
+        secrets.choice(mayusculas),
+        secrets.choice(digitos)
+    ]
+    
+    # Rellenar el resto con el conjunto completo de caracteres
+    todos_los_caracteres = minusculas + mayusculas + digitos
+    for _ in range(longitud - 3):
+        password.append(secrets.choice(todos_los_caracteres))
+        
+    # Mezclar dinámicamente el resultado final
+    secrets.SystemRandom().shuffle(password)
+    return ''.join(password)
+
+
+# ==========================================
+# ENDPOINT EN FASTAPI
+# ==========================================
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest):
+    clean_email = payload.email.strip().lower()
+    
+    # 1. MONGODB: Buscar el usuario
+    user = users_collection.find_one({
+        "email": {"$regex": f"^{clean_email}$", "$options": "i"}
+    })
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe ninguna cuenta vinculada a este correo."
+        )
+
+    # 2. Generar clave provisional dinámica de 8 dígitos/caracteres
+    temp_password = generar_clave_dinamica(longitud=8)
+
+    # 3. MONGODB: Guardar/actualizar la nueva clave provisional del usuario
+    users_collection.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password": temp_password}}
+    )
+
+    # 4. BREVO: Configuración de envío
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = os.getenv("BREVO_API_KEY")
+
+    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+    
+    subject = "Código Provisional de Acceso - ActaProCore"
+    html_content = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif; color: #333; padding: 20px;">
+            <h2 style="color: #4f46e5;">Recuperación de Contraseña</h2>
+            <p>Hola,</p>
+            <p>Has solicitado recuperar tu acceso en <strong>ActaProCore</strong>.</p>
+            <p>Tu clave provisional generada dinámicamente es:</p>
+            <div style="background-color: #f3f4f6; border: 1px solid #e5e7eb; padding: 14px 24px; border-radius: 8px; font-size: 22px; font-weight: bold; width: fit-content; letter-spacing: 3px; color: #1f2937;">
+                {temp_password}
+            </div>
+            <p style="margin-top: 15px;">Ingresa esta clave en el campo <strong>"Contraseña Provisional o Actual"</strong> en el panel de configuración para definir tu nueva contraseña.</p>
+            <br>
+            <p>Atentamente,<br>El equipo de ActaProCore</p>
+        </body>
+    </html>
+    """
+    
+    sender = {"name": "ActaProCore", "email": "soporte@tu-dominio.com"}
+    to = [{"email": clean_email}]
+    
+    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+        to=to,
+        html_content=html_content,
+        sender=sender,
+        subject=subject
+    )
+
+    try:
+        api_instance.send_transac_email(send_smtp_email)
+    except ApiException as e:
+        print(f"Error al enviar correo con Brevo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al enviar el correo con la clave provisional."
+        )
+
+    return {
+        "success": True, 
+        "message": "Se ha generado una clave provisional y se envió a tu correo."
+    }
     
 # 2. Incluirlo en la aplicación principal al final de todo
 
