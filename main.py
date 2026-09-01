@@ -2748,14 +2748,13 @@ from sib_api_v3_sdk.rest import ApiException
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
+# Definimos el router. Si vas a usar include_router(router), no dupliques prefijos.
+router = APIRouter(prefix="/api/user", tags=["User Config"])
+
 # ==========================================
 # FUNCIÓN GENERADORA DE CLAVES DINÁMICAS
 # ==========================================
 def generar_clave_dinamica(longitud: int = 8) -> str:
-    """
-    Genera una contraseña provisional dinámica y segura de la longitud especificada (mínimo 6 dígitos).
-    Garantiza al menos una letra mayúscula, una minúscula y un número.
-    """
     if longitud < 6:
         longitud = 6
 
@@ -2763,25 +2762,22 @@ def generar_clave_dinamica(longitud: int = 8) -> str:
     mayusculas = string.ascii_uppercase
     digitos = string.digits
     
-    # Garantizar diversidad en los primeros caracteres
     password = [
         secrets.choice(minusculas),
         secrets.choice(mayusculas),
         secrets.choice(digitos)
     ]
     
-    # Rellenar el resto con el conjunto completo de caracteres
     todos_los_caracteres = minusculas + mayusculas + digitos
     for _ in range(longitud - 3):
         password.append(secrets.choice(todos_los_caracteres))
         
-    # Mezclar dinámicamente el resultado final
     secrets.SystemRandom().shuffle(password)
     return ''.join(password)
 
 
 # ==========================================
-# ENDPOINT EN FASTAPI
+# MODELO Y ENDPOINT
 # ==========================================
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -2801,10 +2797,10 @@ def forgot_password(payload: ForgotPasswordRequest):
             detail="No existe ninguna cuenta vinculada a este correo."
         )
 
-    # 2. Generar clave provisional dinámica de 8 dígitos/caracteres
+    # 2. Generar clave provisional dinámica
     temp_password = generar_clave_dinamica(longitud=8)
 
-    # 3. MONGODB: Guardar/actualizar la nueva clave provisional del usuario
+    # 3. MONGODB: Guardar la clave provisional
     users_collection.update_one(
         {"_id": user["_id"]},
         {"$set": {"password": temp_password}}
@@ -2834,7 +2830,7 @@ def forgot_password(payload: ForgotPasswordRequest):
     </html>
     """
     
-    sender = {"name": "ActaProCore", "email": "soporte@tu-dominio.com"}
+    sender = {"name": "ActaProCore", "email": "soporte@actaprocore.com"} # Cambiar por tu remitente verificado
     to = [{"email": clean_email}]
     
     send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
