@@ -2801,9 +2801,9 @@ def reset_password_direct(email: str):
         "message": "Contraseña restablecida exitosamente. Tu nueva clave temporal es: Cambiar123*"
     }
 
-@user_config_router.get("/get-current-password")
-def get_current_password(email: str):
-    clean_email = email.strip().lower()
+@user_config_router.post("/get-current-password")
+def get_current_password(payload: ForgotPasswordRequest):
+    clean_email = payload.email.strip().lower()
     
     # Buscar el usuario en MongoDB (ignorando mayúsculas/minúsculas)
     user = users_collection.find_one({
@@ -2822,7 +2822,7 @@ def get_current_password(email: str):
     return {
         "success": True,
         "password": current_password,
-        "message": f"Contraseña encontrada con éxito."
+        "message": "Contraseña encontrada con éxito."
     }
 app.include_router(crm_router)
 app.include_router(user_config_router)
