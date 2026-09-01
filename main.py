@@ -2691,6 +2691,54 @@ def verify_password_otp(payload: VerifyOTPRequest):
         )
 
     return {"success": True, "message": "¡Contraseña actualizada exitosamente!"}
+
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, EmailStr
+
+router = APIRouter(prefix="/api/user", tags=["User Config"])
+
+class ChangePasswordRequest(BaseModel):
+    email: EmailStr
+    current_password: str
+    new_password: str
+
+@router.post("/change-password")
+def change_password(payload: ChangePasswordRequest):
+    clean_email = payload.email.strip().lower()
+    
+    # 1. Buscar usuario en la base de datos
+    user = users_collection.find_one({
+        "email": {"$regex": f"^{clean_email}$", "$options": "i"}
+    })
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado con el correo especificado."
+        )
+
+    # 2. Verificar la contraseña actual / provisional
+    stored_password = user.get("password", "")
+    if payload.current_password != stored_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña actual o provisional es incorrecta."
+        )
+
+    # 3. Validar la nueva contraseña
+    if len(payload.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La nueva contraseña debe tener al menos 6 caracteres."
+        )
+
+    # 4. Actualizar la contraseña en MongoDB
+    users_collection.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password": payload.new_password}}
+    )
+
+    return {"success": True, "message": "Contraseña actualizada correctamente."}
     
 # 2. Incluirlo en la aplicación principal al final de todo
 
