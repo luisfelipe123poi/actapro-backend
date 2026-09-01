@@ -2748,10 +2748,7 @@ from sib_api_v3_sdk.rest import ApiException
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
-# IMPORTANTE: Asegúrate de ajustar esta importación según el archivo donde tengas tu conexión a MongoDB
-from database import users_collection
-
-# Instanciamos usando la variable exacta que ya incluye tu main.py: user_config_router
+# Instanciamos el router usando la variable user_config_router
 user_config_router = APIRouter(prefix="/api/user", tags=["User Config"])
 
 # ==========================================
@@ -2789,7 +2786,7 @@ class ForgotPasswordRequest(BaseModel):
 def forgot_password(payload: ForgotPasswordRequest):
     clean_email = payload.email.strip().lower()
     
-    # 1. MONGODB: Buscar el usuario
+    # 1. MONGODB: Usamos directamente users_collection definida en tu main.py
     user = users_collection.find_one({
         "email": {"$regex": f"^{clean_email}$", "$options": "i"}
     })
@@ -2856,7 +2853,6 @@ def forgot_password(payload: ForgotPasswordRequest):
         "success": True, 
         "message": "Se ha generado una clave provisional y se envió a tu correo."
     }
-
 app.include_router(crm_router)
 app.include_router(user_config_router)
 
