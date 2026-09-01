@@ -2904,6 +2904,99 @@ def get_current_password(payload: ForgotPasswordRequest):
         "password": current_password,
         "message": "Contraseña encontrada con éxito."
     }
+
+import time
+from fastapi import BackgroundTasks, status
+from pydantic import BaseModel
+
+# ==========================================
+# MODELO PARA LA NOTIFICACIÓN GLOBAL
+# ==========================================
+class SystemNotificationRequest(BaseModel):
+    title: str
+    message: str
+
+# Diccionario o variable de control global (o guardado en DB)
+# Para simplificar, guardaremos la última notificación activa en MongoDB o memoria.
+# Aquí la guardaremos en una colección 'system_status'
+
+@user_config_router.post("/admin/broadcast-notification")
+def broadcast_notification(payload: SystemNotificationRequest, background_tasks: BackgroundTasks):
+    # 1. Guardar la notificación activa en MongoDB para que los dashboards la muestren
+    notification_data = {
+        "title": payload.title,
+        "message": payload.message,
+        "active": True
+    }
+    
+    # Suponiendo que tienes una colección llamada system_status_collection
+    db["system_status"].update_one(
+        {"_id": "global_banner"},
+        {"$set": notification_data},
+        upsert=True
+    )
+    
+    # 2. Lanzar la tarea en segundo plano para enviar los correos de forma dosificada (1 por minuto)
+    background_tasks.add_task(enviar_correos_pausados_brevo, payload.title, payload.message)
+    
+    return {
+        "success": True,
+        "message": "Notificación publicada en el dashboard. El envío dosificado de correos ha comenzado en segundo plano."
+    }
+
+@user_config_router.get("/system/active-notification")
+def get_active_notification():
+    # Endpoint que el dashboard del cliente consultará al cargar
+    status_doc = db["system_status"].find_one({"_id": "global_banner"})
+    if not status_doc or not status_doc.get("active", False):
+        return {"active": False}
+    return {
+        "active": True,
+        "title": status_doc.get("title"),
+        "message": status_doc.get("message")
+    }
+
+# Tarea en segundo plano para enviar correos pausados (1 cada 60 segundos)
+def enviar_correos_pausados_brevo(title: str, message: str):
+    all_users = list(users_collection.find({}, {"email": 1}))
+    
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = os.getenv("BREVO_API_KEY")
+    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+    
+    for user in all_users:
+        user_email = user.get("email")
+        if not user_email:
+            continue
+            
+        html_content = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; color: #333; padding: 20px;">
+                <h2 style="color: #d97706;">{title}</h2>
+                <p>Estimado usuario,</p>
+                <p>{message}</p>
+                <br>
+                <p>Atentamente,<br>El equipo de ActaProCore</p>
+            </body>
+        </html>
+        """
+        
+        send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+            to=[{"email": user_email}],
+            html_content=html_content,
+            sender={"name": "ActaProCore Soporte", "email": "soporte@actaprocore.com"},
+            subject=title
+        )
+        
+        try:
+            api_instance.send_transac_email(send_smtp_email)
+            print(f"Correo de aviso enviado con éxito a: {user_email}")
+        except ApiException as e:
+            print(f"Error al enviar correo a {user_email} con Brevo: {e}")
+            
+        # Pausa de 60 segundos exacta para evitar ráfagas y bloqueos de tasa (Rate Limit)
+        time.sleep(60)
+        
 app.include_router(crm_router)
 app.include_router(user_config_router)
 
