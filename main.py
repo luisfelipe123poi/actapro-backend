@@ -2748,7 +2748,7 @@ from sib_api_v3_sdk.rest import ApiException
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
-# Definimos el router. Si vas a usar include_router(router), no dupliques prefijos.
+# Definición del router con su prefijo base
 router = APIRouter(prefix="/api/user", tags=["User Config"])
 
 # ==========================================
@@ -2782,8 +2782,8 @@ def generar_clave_dinamica(longitud: int = 8) -> str:
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
+# Deja un solo decorador
 @router.post("/forgot-password")
-@router.post("/forgot-password/")  # Agrega esta línea para soportar ambas variantes
 def forgot_password(payload: ForgotPasswordRequest):
     clean_email = payload.email.strip().lower()
     
@@ -2831,7 +2831,7 @@ def forgot_password(payload: ForgotPasswordRequest):
     </html>
     """
     
-    sender = {"name": "ActaProCore", "email": "soporte@actaprocore.com"} # Cambiar por tu remitente verificado
+    sender = {"name": "ActaProCore", "email": "soporte@actaprocore.com"}
     to = [{"email": clean_email}]
     
     send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
@@ -2854,8 +2854,6 @@ def forgot_password(payload: ForgotPasswordRequest):
         "success": True, 
         "message": "Se ha generado una clave provisional y se envió a tu correo."
     }
-    
-# 2. Incluirlo en la aplicación principal al final de todo
 
 app.include_router(crm_router)
 app.include_router(user_config_router)
