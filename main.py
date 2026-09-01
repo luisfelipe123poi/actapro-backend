@@ -633,7 +633,7 @@ def crear_preferencia_pago(data: PaymentPreferenceModel):
 async def webhook_mercadopago(request: Request):
     """
     Recibe notificaciones automáticas de Mercado Pago, consulta el API oficial,
-    detecta el plan de forma blindada mediante monto y referencia, actualiza los contadores en MongoDB y envía un correo con Brevo.
+    y solo procesa y crea/actualiza el usuario en MongoDB si el pago está aprobado.
     """
     try:
         body = await request.json()
@@ -647,98 +647,104 @@ async def webhook_mercadopago(request: Request):
                 else:
                     payment = payment_info
 
-                if payment.get("status") == "approved":
-                    payer_email = payment.get("payer", {}).get("email")
-                    ext_ref = payment.get("external_reference", "")
+                # ==========================================================
+                # CORREO BLINDADO: Validar estrictamente el estado "approved"
+                # Si el pago no es exitoso, se ignora por completo y no toca MongoDB
+                # ==========================================================
+                if payment.get("status") != "approved":
+                    return {"status": "ignored", "message": f"Pago no aprobado (estado: {payment.get('status')})"}
+
+                payer_email = payment.get("payer", {}).get("email")
+                ext_ref = payment.get("external_reference", "")
+                
+                # Recuperar email de respaldo o dividir la referencia externa
+                plan_desde_ref = None
+                if "|" in ext_ref:
+                    parts = ext_ref.split("|")
+                    if not payer_email:
+                        payer_email = parts[0]
+                    plan_desde_ref = parts[1]
+                elif not payer_email:
+                    payer_email = ext_ref
+
+                if payer_email:
+                    payer_email = payer_email.strip().lower()
                     
-                    # Recuperar email de respaldo o dividir la referencia externa
-                    plan_desde_ref = None
-                    if "|" in ext_ref:
-                        parts = ext_ref.split("|")
-                        if not payer_email:
-                            payer_email = parts[0]
-                        plan_desde_ref = parts[1]
-                    elif not payer_email:
-                        payer_email = ext_ref
-
-                    if payer_email:
-                        payer_email = payer_email.strip().lower()
-                        
-                        plan_asignado = "basico"
-                        
-                        # 1. Intentar por external_reference si viene empaquetado
-                        if plan_desde_ref and plan_desde_ref in PRECIOS_PLANES:
-                            plan_asignado = plan_desde_ref
-                        else:
-                            # 2. Blindaje por monto exacto pagado (transaction_amount)
-                            monto_pagado = float(payment.get("transaction_amount", 0))
-                            for p_id, info in PRECIOS_PLANES.items():
-                                if float(info.get("precio", 0)) == monto_pagado:
-                                    plan_asignado = p_id
-                                    break
+                    plan_asignado = "basico"
+                    
+                    # 1. Intentar por external_reference si viene empaquetado
+                    if plan_desde_ref and plan_desde_ref in PRECIOS_PLANES:
+                        plan_asignado = plan_desde_ref
+                    else:
+                        # 2. Blindaje por monto exacto pagado (transaction_amount)
+                        monto_pagado = float(payment.get("transaction_amount", 0))
+                        for p_id, info in PRECIOS_PLANES.items():
+                            if float(info.get("precio", 0)) == monto_pagado:
+                                plan_asignado = p_id
+                                break
                             
-                            # 3. Si el monto falla, respaldo por lectura de ítems o título
-                            if plan_asignado == "basico":
-                                items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
-                                for item in items:
-                                    title_lower = item.get("title", "").lower()
-                                    if "corporativo" in title_lower or "pro" in title_lower:
-                                        plan_asignado = "corporativo"
-                                        break
-                                    elif "profesional" in title_lower or "intermedio" in title_lower:
-                                        plan_asignado = "profesional"
-                                        break
+                        # 3. Si el monto falla, respaldo por lectura de ítems o título
+                        if plan_asignado == "basico":
+                            items = payment.get("additional_info", {}).get("items", []) or payment.get("items", [])
+                            for item in items:
+                                title_lower = item.get("title", "").lower()
+                                if "corporativo" in title_lower or "pro" in title_lower:
+                                    plan_asignado = "corporativo"
+                                    break
+                                elif "profesional" in title_lower or "intermedio" in title_lower:
+                                    plan_asignado = "profesional"
+                                    break
 
-                        info_plan = PRECIOS_PLANES.get(plan_asignado, PRECIOS_PLANES["basico"])
-                        
-                        tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
-                        horas_otorgadas = info_plan.get("limite_horas", 15.0)
-                        precio_pagado = info_plan.get("precio", 0.0)
-                        nombre_plan_fmt = info_plan.get("nombre", plan_asignado.capitalize())
+                    info_plan = PRECIOS_PLANES.get(plan_asignado, PRECIOS_PLANES["basico"])
+                    
+                    tokens_otorgados = info_plan.get("tokens_mensuales", 100000)
+                    horas_otorgadas = info_plan.get("limite_horas", 15.0)
+                    precio_pagado = info_plan.get("precio", 0.0)
+                    nombre_plan_fmt = info_plan.get("nombre", plan_asignado.capitalize())
 
-                        # --- VERIFICACIÓN DE USUARIO EXISTENTE VS NUEVO ---
-                        user_existente = users_collection.find_one({"email": payer_email})
-                        es_nuevo = False
+                    # --- VERIFICACIÓN DE USUARIO EXISTENTE VS NUEVO ---
+                    user_existente = users_collection.find_one({"email": payer_email})
+                    es_nuevo = False
 
-                        if user_existente and user_existente.get("password"):
-                            # Usuario ya existente en la base de datos
-                            password_temporal = "Tu contraseña actual registrada"
-                        else:
-                            # Usuario nuevo que no existía previamente
-                            password_temporal = generar_password_temporal()
-                            es_nuevo = True
+                    if user_existente and user_existente.get("password"):
+                        # Usuario ya existente en la base de datos
+                        password_temporal = "Tu contraseña actual registrada"
+                    else:
+                        # Usuario nuevo que no existía previamente
+                        password_temporal = generar_password_temporal()
+                        es_nuevo = True
 
-                        # Actualizar o insertar en MongoDB
-                        users_collection.update_one(
-                            {"email": payer_email},
-                            {
-                                "$set": {
-                                    "plan": plan_asignado,
-                                    "tokens_usados": 0,
-                                    "limite_tokens_mes": tokens_otorgados,
-                                    "horas_usadas_mes": 0.0,
-                                    "horas_restantes": horas_otorgadas,
-                                    "limite_horas_mes": horas_otorgadas,
-                                },
-                                "$setOnInsert": {
-                                    "email": payer_email,
-                                    "password": password_temporal,
-                                }
+                    # Actualizar o insertar en MongoDB (Sólo ocurre porque el pago YA fue confirmado como approved)
+                    users_collection.update_one(
+                        {"email": payer_email},
+                        {
+                            "$set": {
+                                "plan": plan_asignado,
+                                "tokens_usados": 0,
+                                "limite_tokens_mes": tokens_otorgados,
+                                "horas_usadas_mes": 0.0,
+                                "horas_restantes": horas_otorgadas,
+                                "limite_horas_mes": horas_otorgadas,
                             },
-                            upsert=True
-                        )
+                            "$setOnInsert": {
+                                "email": payer_email,
+                                "password": password_temporal,
+                            }
+                        },
+                        upsert=True
+                    )
 
-                        # Configurar mensaje dinámico según si es actualización o cuenta nueva
-                        nombre_usuario = payer_email.split("@")[0].capitalize()
-                        
-                        if es_nuevo:
-                            asunto_correo = f"¡Bienvenido! Licencia {nombre_plan_fmt} Activada"
-                            mensaje_bienvenida = "Te confirmamos que tu pago ha sido procesado exitosamente y tu suscripción ya se encuentra activa en nuestro sistema."
-                        else:
-                            asunto_correo = f"¡Actualización Exitosa! Tu Plan cambió a {nombre_plan_fmt}"
-                            mensaje_bienvenida = f"Tu cuenta ha sido actualizada exitosamente al <strong>Plan {nombre_plan_fmt}</strong>. Tus nuevos límites de horas y tokens ya están disponibles."
+                    # Configurar mensaje dinámico según si es actualización o cuenta nueva
+                    nombre_usuario = payer_email.split("@")[0].capitalize()
+                    
+                    if es_nuevo:
+                        asunto_correo = f"¡Bienvenido! Licencia {nombre_plan_fmt} Activada"
+                        mensaje_bienvenida = "Te confirmamos que tu pago ha sido procesado exitosamente y tu suscripción ya se encuentra activa en nuestro sistema."
+                    else:
+                        asunto_correo = f"¡Actualización Exitosa! Tu Plan cambió a {nombre_plan_fmt}"
+                        mensaje_bienvenida = f"Tu cuenta ha sido actualizada exitosamente al <strong>Plan {nombre_plan_fmt}</strong>. Tus nuevos límites de horas y tokens ya están disponibles."
 
-                        html_cuerpo = f"""<!DOCTYPE html>
+                    html_cuerpo = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -841,10 +847,10 @@ async def webhook_mercadopago(request: Request):
     </table>
 </body>
 </html>"""
-                        
-                        enviar_correo_brevo(payer_email, nombre_usuario, asunto_correo, html_cuerpo)
+                    
+                    enviar_correo_brevo(payer_email, nombre_usuario, asunto_correo, html_cuerpo)
 
-                        return {"status": "success", "message": f"Licencia de {payer_email} actualizada a {plan_asignado}"}
+                    return {"status": "success", "message": f"Licencia de {payer_email} actualizada a {plan_asignado}"}
     except Exception as e:
         print(f"Error en webhook de Mercado Pago: {e}")
         raise HTTPException(status_code=500, detail=str(e))
