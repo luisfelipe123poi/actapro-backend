@@ -2771,7 +2771,87 @@ def generar_clave_dinamica(longitud: int = 8) -> str:
     secrets.SystemRandom().shuffle(password)
     return ''.join(password)
 
+# ==========================================
+# MODELO PARA RECUPERACIÓN
+# ==========================================
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
 
+
+# ==========================================
+# ENDPOINT ADAPTADO A TU USER_CONFIG_ROUTER
+# ==========================================
+@user_config_router.post("/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest):
+    clean_email = payload.email.strip().lower()
+    
+    # 1. MONGODB: Buscar el usuario asegurando la misma lógica que tus otros endpoints
+    user = users_collection.find_one({
+        "email": {"$regex": f"^{clean_email}$", "$options": "i"}
+    })
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No existe ninguna cuenta vinculada a este correo."
+        )
+
+    # 2. Generar clave provisional dinámica de 8 caracteres
+    temp_password = generar_clave_dinamica(longitud=8)
+
+    # 3. MONGODB: Guardar la clave provisional en texto plano (coherente con tu sistema actual)
+    users_collection.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password": temp_password}}
+    )
+
+    # 4. BREVO: Configuración de envío de correo electrónico transaccional
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = os.getenv("BREVO_API_KEY")
+
+    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+    
+    subject = "Código Provisional de Acceso - ActaProCore"
+    html_content = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif; color: #333; padding: 20px;">
+            <h2 style="color: #4f46e5;">Recuperación de Contraseña</h2>
+            <p>Hola,</p>
+            <p>Has solicitado recuperar tu acceso en <strong>ActaProCore</strong>.</p>
+            <p>Tu clave provisional generada dinámicamente es:</p>
+            <div style="background-color: #f3f4f6; border: 1px solid #e5e7eb; padding: 14px 24px; border-radius: 8px; font-size: 22px; font-weight: bold; width: fit-content; letter-spacing: 3px; color: #1f2937;">
+                {temp_password}
+            </div>
+            <p style="margin-top: 15px;">Ingresa esta clave en el campo <strong>"Contraseña Provisional o Actual"</strong> en el panel de configuración para definir tu nueva contraseña.</p>
+            <br>
+            <p>Atentamente,<br>El equipo de ActaProCore</p>
+        </body>
+    </html>
+    """
+    
+    sender = {"name": "ActaProCore", "email": "soporte@actaprocore.com"}
+    to = [{"email": clean_email}]
+    
+    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+        to=to,
+        html_content=html_content,
+        sender=sender,
+        subject=subject
+    )
+
+    try:
+        api_instance.send_transac_email(send_smtp_email)
+    except ApiException as e:
+        print(f"Error al enviar correo con Brevo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al enviar el correo con la clave provisional."
+        )
+
+    return {
+        "success": True, 
+        "message": "Se ha generado una clave provisional y se envió a tu correo."
+    }
 
 
 @user_config_router.get("/reset-password-direct")
