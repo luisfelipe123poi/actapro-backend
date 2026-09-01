@@ -2748,8 +2748,11 @@ from sib_api_v3_sdk.rest import ApiException
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
-# Definición del router con su prefijo base
-router = APIRouter(prefix="/api/user", tags=["User Config"])
+# IMPORTANTE: Asegúrate de ajustar esta importación según el archivo donde tengas tu conexión a MongoDB
+from database import users_collection
+
+# Instanciamos usando la variable exacta que ya incluye tu main.py: user_config_router
+user_config_router = APIRouter(prefix="/api/user", tags=["User Config"])
 
 # ==========================================
 # FUNCIÓN GENERADORA DE CLAVES DINÁMICAS
@@ -2782,8 +2785,7 @@ def generar_clave_dinamica(longitud: int = 8) -> str:
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
-# Deja un solo decorador
-@router.post("/forgot-password")
+@user_config_router.post("/forgot-password")
 def forgot_password(payload: ForgotPasswordRequest):
     clean_email = payload.email.strip().lower()
     
