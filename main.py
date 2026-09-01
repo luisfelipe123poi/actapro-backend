@@ -2783,6 +2783,7 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 @router.post("/forgot-password")
+@router.post("/forgot-password/")  # Agrega esta línea para soportar ambas variantes
 def forgot_password(payload: ForgotPasswordRequest):
     clean_email = payload.email.strip().lower()
     
