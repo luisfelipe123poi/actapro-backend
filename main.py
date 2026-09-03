@@ -3016,6 +3016,29 @@ def enviar_correos_pausados_brevo(title: str, message: str):
             
         # Pausa de 60 segundos exacta para evitar ráfagas y bloqueos de tasa (Rate Limit)
         time.sleep(60)
+
+# ==========================================
+# ENDPOINT 3: LIMPIAR / DESACTIVAR ANUNCIOS DEL DASHBOARD
+# ==========================================
+@user_config_router.post("/admin/clear-banner")
+def clear_banner():
+    # Desactiva y limpia el banner global en MongoDB
+    notification_data = {
+        "title": None,
+        "message": None,
+        "active": False
+    }
+    
+    db["system_status"].update_one(
+        {"_id": "global_banner"},
+        {"$set": notification_data},
+        upsert=True
+    )
+    
+    return {
+        "success": True,
+        "message": "Anuncios eliminados y limpiados de todos los dashboards exitosamente."
+    }
         
 app.include_router(crm_router)
 app.include_router(user_config_router)
