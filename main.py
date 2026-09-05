@@ -92,6 +92,7 @@ actas_collection = db["actas_historial"]
 transripciones_collection = db["transripciones_cache"]
 scanners_historial_collection = db["scanners_historial"]
 soporte_collection = db["soporte_feedback"]
+nichos_collection = db["nichos"]
 
 # Configurar índice TTL para caché de transcripciones
 try:
@@ -3044,8 +3045,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
 
-# Asumiendo que ya tienes tu cliente de MongoDB configurado
-db = client["actabot_db"]
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from datetime import datetime
+
+# Usamos la colección directamente desde tu 'db' ya configurada
 nichos_collection = db["nichos"]
 
 class NichoRequest(BaseModel):
@@ -3080,35 +3084,7 @@ def verificar_nicho(email: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-from pydantic import BaseModel
-from datetime import datetime
 
-# Conexión a la base de datos y colección nueva solicitada
-db = client["actabot_db"]
-nichos_collection = db["nichos"]
-
-class NichoData(BaseModel):
-    email: str
-    nicho: str
-
-@app.post("/api/user/nicho")
-def guardar_nicho_usuario(data: NichoData):
-    try:
-        # Verificar si ya existe para evitar duplicados en la colección
-        existente = nichos_collection.find_one({"email": data.email})
-        if existente:
-            return {"success": True, "message": "El nicho ya se encontraba registrado."}
-        
-        # Insertar documento estructurado con el correo y el campo pedido
-        nichos_collection.insert_one({
-            "email": data.email,
-            "nicho": data.nicho,
-            "fecha_registro": datetime.utcnow()
-        })
-        
-        return {"success": True, "message": "Nicho registrado exitosamente en MongoDB."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
         
 app.include_router(crm_router)
 app.include_router(user_config_router)
