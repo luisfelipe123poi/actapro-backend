@@ -3039,6 +3039,76 @@ def clear_banner():
         "success": True,
         "message": "Anuncios eliminados y limpiados de todos los dashboards exitosamente."
     }
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from datetime import datetime
+
+# Asumiendo que ya tienes tu cliente de MongoDB configurado
+db = client["actabot_db"]
+nichos_collection = db["nichos"]
+
+class NichoRequest(BaseModel):
+    email: str
+    nicho: str
+
+@app.post("/api/user/nicho")
+def guardar_nicho(data: NichoRequest):
+    try:
+        # Verificar si ya existe un registro para este usuario
+        existente = nichos_collection.find_one({"email": data.email})
+        if existente:
+            return {"success": True, "message": "El nicho ya había sido registrado anteriormente."}
+        
+        # Guardar por primera vez
+        nichos_collection.insert_one({
+            "email": data.email,
+            "nicho": data.nicho,
+            "fecha_registro": datetime.utcnow()
+        })
+        
+        return {"success": True, "message": "Nicho registrado exitosamente."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/user/nicho-check/{email}")
+def verificar_nicho(email: str):
+    try:
+        registro = nichos_collection.find_one({"email": email})
+        tiene_nicho = True if registro else False
+        return {"success": True, "tiene_nicho": tiene_nicho}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+from pydantic import BaseModel
+from datetime import datetime
+
+# Conexión a la base de datos y colección nueva solicitada
+db = client["actabot_db"]
+nichos_collection = db["nichos"]
+
+class NichoData(BaseModel):
+    email: str
+    nicho: str
+
+@app.post("/api/user/nicho")
+def guardar_nicho_usuario(data: NichoData):
+    try:
+        # Verificar si ya existe para evitar duplicados en la colección
+        existente = nichos_collection.find_one({"email": data.email})
+        if existente:
+            return {"success": True, "message": "El nicho ya se encontraba registrado."}
+        
+        # Insertar documento estructurado con el correo y el campo pedido
+        nichos_collection.insert_one({
+            "email": data.email,
+            "nicho": data.nicho,
+            "fecha_registro": datetime.utcnow()
+        })
+        
+        return {"success": True, "message": "Nicho registrado exitosamente en MongoDB."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
         
 app.include_router(crm_router)
 app.include_router(user_config_router)
