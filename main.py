@@ -3084,6 +3084,21 @@ def verificar_nicho(email: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/user/completar-onboarding")
+async def actualizar_onboarding(data: dict):
+    email = data.get("email")
+    sector = data.get("sector_preferido")
+    
+    # Actualizas en MongoDB tu colección de usuarios
+    resultado = db.usuarios.update_one(
+        {"email": email},
+        {"$set": {"onboarding_completado": True, "sector_preferido": sector}}
+    )
+    
+    if resultado.modified_count > 0 or resultado.matched_count > 0:
+        return {"status": "success", "message": "Onboarding completado correctamente"}
+    return {"status": "error", "message": "Usuario no encontrado"}, 404
+
 
         
 app.include_router(crm_router)
