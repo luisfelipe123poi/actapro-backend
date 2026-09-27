@@ -363,22 +363,27 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
 
         session_id = str(uuid.uuid4())
         
-        # Seleccionar el prompt de sistema adecuado según el motor recibido del frontend
+        # Seleccionar el prompt, el sufijo del archivo y el título dinámico según el motor recibido
         if motor == "corporativo":
             prompt_base = PROMPT_SISTEMA_CORPORATIVO
             sufijo_nombre = "Junta_Directiva"
+            titulo_documento = "ACTA DE JUNTA DIRECTIVA Y REUNIÓN CORPORATIVA"
         elif motor == "legal_abogados":
             prompt_base = PROMPT_SISTEMA_LEGAL
             sufijo_nombre = "Dictamen_Legal"
+            titulo_documento = "DICTAMEN Y ACTA DE AUDIENCIA / ASESORÍA LEGAL"
         elif motor == "medico_salud":
             prompt_base = PROMPT_SISTEMA_MEDICO
             sufijo_nombre = "Comite_Medico"
+            titulo_documento = "ACTA DE COMITÉ MÉDICO Y GESTIÓN CLÍNICA"
         elif motor == "educativo_academico":
             prompt_base = PROMPT_SISTEMA_EDUCATIVO
             sufijo_nombre = "Consejo_Academico"
+            titulo_documento = "ACTA DE CONSEJO ACADÉMICO Y REUNIÓN EDUCATIVA"
         else:
             prompt_base = PROMPT_SISTEMA_ACTAS
             sufijo_nombre = "Acta_Asamblea"
+            titulo_documento = "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS"
 
         nombre_archivo_acta = f"{sufijo_nombre}_{session_id[:8]}.docx" if not nombre_personalizado else f"{nombre_personalizado.strip().replace(' ', '_')}.docx"
 
@@ -396,9 +401,9 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
         )
         acta_final = response.choices[0].message.content
 
-        # Crear documento Word en memoria
+        # Crear documento Word en memoria usando el título dinámico del nicho seleccionado
         doc = Document()
-        doc.add_heading("DOCUMENTO OFICIAL GENERADO POR INTELIGENCIA ARTIFICIAL", level=0).alignment = 1
+        doc.add_heading(titulo_documento, level=0).alignment = 1
         for linea in acta_final.split("\n"):
             if linea.strip():
                 doc.add_paragraph(linea.strip())
