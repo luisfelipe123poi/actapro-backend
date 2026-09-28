@@ -205,9 +205,6 @@ def generar_password_temporal(longitud=8):
     return "".join(secrets.choice(caracteres) for _ in range(longitud))
 
 
-
-
-
 # ==========================================
 # 4. Función Auxiliar para Enviar Correos con Brevo
 # ==========================================
@@ -918,7 +915,6 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 async def procesar_asamblea(
     file: UploadFile = File(...),
     email: str = Form(...),
-    motor: Optional[str] = Form("asamblea_ph"),
     instrucciones: Optional[str] = Form(None),
     nombre_personalizado: Optional[str] = Form(None)
 ):
@@ -942,20 +938,19 @@ async def procesar_asamblea(
         # Construir la URL pública accesible por el Worker de Celery y AssemblyAI
         audio_url = f"{R2_PUBLIC_URL.rstrip('/')}/{unique_filename}"
 
-        # Disparar la tarea en Celery pasando el motor y la URL web
+        # Disparar la tarea en Celery pasando la URL web en lugar de una ruta local
         task = task_procesar_asamblea.delay(
             temp_audio_path=audio_url,
             email=email,
             instrucciones=instrucciones,
             nombre_personalizado=nombre_personalizado,
-            original_filename=file.filename,
-            motor=motor or "asamblea_ph"
+            original_filename=file.filename
         )
 
         return {
             "status": "pending",
             "task_id": task.id,
-            "message": "Procesamiento de documento iniciado correctamente en la nube."
+            "message": "Procesamiento de asamblea iniciado correctamente en la nube."
         }
 
     except Exception as e:
