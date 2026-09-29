@@ -376,8 +376,6 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
             })
 
         self.update_state(state="PROCESSING", meta={"status": "Generando el Documento Especializado con IA..."})
-
-        session_id = str(uuid.uuid4())
         
         # Seleccionar el prompt, el sufijo del archivo y el título dinámico según el motor recibido
         if motor == "corporativo":
@@ -401,7 +399,8 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
             sufijo_nombre = "Acta_Asamblea"
             titulo_documento = "ACTA DE ASAMBLEA GENERAL DE COPROPIETARIOS"
 
-        nombre_archivo_acta = f"{sufijo_nombre}_{session_id[:8]}.docx" if not nombre_personalizado else f"{nombre_personalizado.strip().replace(' ', '_')}.docx"
+        # Nombre del archivo para descarga (usa el nombre personalizado o el sufijo por defecto)
+        nombre_archivo_acta = f"{sufijo_nombre}.docx" if not nombre_personalizado else f"{nombre_personalizado.strip().replace(' ', '_')}.docx"
 
         prompt_final = prompt_base
         if instrucciones:
@@ -429,8 +428,8 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
         doc_io.seek(0)
         docx_bytes = doc_io.read()
 
-        # Subir .docx a Cloudflare R2
-        r2_docx_key = f"actas_generadas/{session_id}_{nombre_archivo_acta}"
+        # Subir .docx a Cloudflare R2 usando celery_task_id para garantizar idempotencia
+        r2_docx_key = f"actas_generadas/{celery_task_id}_{nombre_archivo_acta}"
         s3 = get_r2_client()
         s3.put_object(
             Bucket=R2_BUCKET_NAME,
@@ -459,7 +458,7 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
                 }
             )
 
-        # ACTUALIZACIÓN DEL REGISTRO PRE-CREADO EN MONGODB (NO USAR insert_one AQUÍ)
+        # ACTUALIZACIÓN DEL REGISTRO PRE-CREADO EN MONGODB
         update_data = {
             "estado": "COMPLETED",
             "file_hash": file_hash,
