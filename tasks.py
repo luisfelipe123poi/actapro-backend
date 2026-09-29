@@ -309,12 +309,13 @@ def get_r2_client():
 # ==========================================
 @celery_app.task(
     bind=True,
-    max_retries=5,
+    max_retries=3,
     default_retry_delay=15,
-    autoretry_for=(requests.RequestException, openai.APIError, Exception)
+    autoretry_for=(requests.RequestException, openai.APIError)
 )
 def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones: str, nombre_personalizado: str, original_filename: str, motor: str = "asamblea_ph"):
     try:
+        celery_task_id = self.request.id
         self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores desde la nube..."})
 
         # Descarga con stream=True para calcular el hash por bloques sin saturar la RAM
@@ -329,8 +330,21 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
                 sha256_hash.update(chunk)
                 
         file_hash = sha256_hash.hexdigest()
-        cached = transripciones_collection.find_one({"file_hash": file_hash})
 
+        # PROTECCIÓN DE IDEMPOTENCIA POR TASK_ID (Evita duplicados si Celery reintenta por error de red al finalizar)
+        if email:
+            acta_reintentada = actas_collection.find_one({
+                "celery_task_id": celery_task_id
+            })
+            if acta_reintentada:
+                return {
+                    "status": "COMPLETED",
+                    "acta_id": str(acta_reintentada["_id"]),
+                    "nombre_acta": acta_reintentada["nombre_acta"],
+                    "file_url": acta_reintentada["file_url"]
+                }
+
+        cached = transripciones_collection.find_one({"file_hash": file_hash})
         duracion_segundos = 0
 
         if cached:
@@ -448,9 +462,11 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
                 }
             )
 
-        # Guardar historial de acta
+        # Guardar historial de acta con su celery_task_id de protección
         data_acta = {
             "email": email,
+            "celery_task_id": celery_task_id,
+            "file_hash": file_hash,
             "nombre_acta": nombre_archivo_acta,
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "peso": peso_archivo,
@@ -477,13 +493,30 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
 # ==========================================
 @celery_app.task(
     bind=True,
-    max_retries=5,
+    max_retries=3,
     default_retry_delay=10,
-    autoretry_for=(openai.APIError, Exception)
+    autoretry_for=(openai.APIError, requests.RequestException)
 )
 def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str = None):
     try:
+        celery_task_id = self.request.id
         self.update_state(state="PROCESSING", meta={"status": "Validando permisos y leyendo archivo..."})
+
+        # =========================================================================
+        # PROTECCIÓN DE IDEMPOTENCIA POR TASK_ID:
+        # Si esta tarea específica ya había terminado de procesarse y guardarse, 
+        # pero falló al retornar la respuesta al broker, evitamos duplicar tokens y registros.
+        # =========================================================================
+        if email:
+            scanner_reintentado = scanners_historial_collection.find_one({
+                "celery_task_id": celery_task_id
+            })
+            if scanner_reintentado:
+                return {
+                    "status": "COMPLETED",
+                    "transcripcion": scanner_reintentado["contenido"],
+                    "id": str(scanner_reintentado["_id"])
+                }
 
         # Validar límite de tokens del usuario
         if email:
@@ -545,7 +578,7 @@ def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str
 
             contenido_usuario = f"""Analyze the following text extracted from the document. Your output must be EXCLUSIVELY corporate semantic HTML ready to render directly in a browser or web container.
 - Replicate the original visual and section structure.
-- Use <h1>, 2> for main and section titles.
+- Use <h1>, <h2> for main and section titles.
 - Use <p> for paragraphs with Tailwind classes (e.g., text-slate-900, text-xs, leading-relaxed).
 - Use complete table tags (<table>, <thead>, <tbody>, <tr>, <th>, <td>) with borders and corporate classes if there is structured data.
 - If you detect references to charts, schemes, or diagrams, create them as a visual block with a dotted border.
@@ -598,11 +631,12 @@ STRICT RULES:
             resultado_html = resultado_html[:-3]
         resultado_html = resultado_html.strip()
 
-        # Guardar registro en historial de scanners
+        # Guardar registro en historial de scanners incluyendo el celery_task_id
         scanner_id = None
         if email:
             nuevo_registro = {
                 "email": email,
+                "celery_task_id": celery_task_id,
                 "nombre": filename or "Documento Escaneado",
                 "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "tokens": tokens_consumidos,
