@@ -912,14 +912,27 @@ async def procesar_asamblea(
     nombre_personalizado: Optional[str] = Form(None)
 ):
     try:
-        # Generar un nombre único para el archivo en la nube
-        file_extension = Path(file.filename).suffix
-        unique_filename = f"audios/{uuid.uuid4()}{file_extension}"
+        # 1. Validar cuota inicial antes de subir archivos o encolar
+        usuario = users_collection.find_one({"email": email})
+        if not usuario:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="El usuario especificado no existe."
+            )
         
-        # Leer los bytes del archivo directamente de la petición
-        file_bytes = await file.read()
+        if usuario.get("horas_restantes", 0) <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Has agotado las horas disponibles en tu plan."
+            )
 
-        # Subir el archivo directamente a Cloudflare R2
+        # 2. Generar IDs y nombres de almacenamiento
+        task_id = str(uuid.uuid4())
+        file_extension = Path(file.filename).suffix
+        unique_filename = f"audios/{task_id}{file_extension}"
+        
+        # 3. Leer bytes y subir a Cloudflare R2
+        file_bytes = await file.read()
         s3 = get_r2_client()
         s3.put_object(
             Bucket=R2_BUCKET_NAME,
@@ -928,25 +941,52 @@ async def procesar_asamblea(
             ContentType=file.content_type or "audio/mpeg"
         )
 
-        # Construir la URL pública accesible por el Worker de Celery y AssemblyAI
         audio_url = f"{R2_PUBLIC_URL.rstrip('/')}/{unique_filename}"
+        nombre_final_acta = f"{nombre_personalizado.strip().replace(' ', '_')}.docx" if nombre_personalizado else f"Acta_{task_id[:8]}.docx"
 
-        # Disparar la tarea en Celery pasando el motor y la URL web
-        task = task_procesar_asamblea.delay(
-            temp_audio_path=audio_url,
-            email=email,
-            instrucciones=instrucciones,
-            nombre_personalizado=nombre_personalizado,
-            original_filename=file.filename,
-            motor=motor or "asamblea_ph"
+        # 4. PRE-CREACIÓN DE REGISTRO ÚNICO (Evita duplicidad)
+        acta_precreada = {
+            "email": email,
+            "celery_task_id": task_id,
+            "nombre_acta": nombre_final_acta,
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "estado": "PROCESSING",
+            "peso": f"{round(len(file_bytes) / 1024, 1)} KB",
+            "contenido": "",
+            "duracion_horas": 0,
+            "file_url": "",
+            "motor": motor or "asamblea_ph",
+            "createdAt": datetime.now(timezone.utc)
+        }
+        
+        # Insertar registro único con upsert o validando celery_task_id
+        actas_collection.update_one(
+            {"celery_task_id": task_id},
+            {"$setOnInsert": acta_precreada},
+            upsert=True
+        )
+
+        # 5. Disparar la tarea en Celery usando el task_id explícito
+        task_procesar_asamblea.apply_async(
+            kwargs={
+                "temp_audio_path": audio_url,
+                "email": email,
+                "instrucciones": instrucciones,
+                "nombre_personalizado": nombre_personalizado,
+                "original_filename": file.filename,
+                "motor": motor or "asamblea_ph"
+            },
+            task_id=task_id
         )
 
         return {
             "status": "pending",
-            "task_id": task.id,
+            "task_id": task_id,
             "message": "Procesamiento de documento iniciado correctamente en la nube."
         }
 
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1062,28 +1102,68 @@ async def escanear_documento(
     email: Optional[str] = Form(None)
 ):
     try:
-        # 1. Leer los bytes del archivo subido
-        file_bytes = await file.read()
+        # 1. Validar cuota de tokens si hay usuario especificado
+        if email:
+            usuario = users_collection.find_one({"email": email})
+            if usuario:
+                tokens_usados = usuario.get("tokens_usados", 0)
+                limite_tokens = usuario.get("limite_tokens_mes", 0)
+                if limite_tokens > 0 and tokens_usados >= limite_tokens:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Has alcanzado el límite de tokens mensuales de tu plan."
+                    )
 
-        # 2. Convertir los bytes a string Base64 para pasarlos por la cola de Celery
+        # 2. Leer bytes y codificar a Base64
+        file_bytes = await file.read()
         file_bytes_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
-        # 3. Disparar la tarea asíncrona en Celery pasando el Base64
-        task = task_escanear_documento.delay(
-            file_bytes_b64=file_bytes_b64,
-            filename=file.filename,
-            email=email
+        # 3. Generar un task_id determinista
+        task_id = str(uuid.uuid4())
+
+        # 4. PRE-CREACIÓN DE REGISTRO ÚNICO EN MONGODB (Garantiza 1 solo registro)
+        if email:
+            scanner_precreado = {
+                "email": email,
+                "celery_task_id": task_id,
+                "nombre": file.filename or "Documento Escaneado",
+                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "estado": "PROCESSING",
+                "tokens": 0,
+                "contenido": "",
+                "createdAt": datetime.now(timezone.utc)
+            }
+            
+            scanners_historial_collection.update_one(
+                {"celery_task_id": task_id},
+                {"$setOnInsert": scanner_precreado},
+                upsert=True
+            )
+
+        # 5. Disparar la tarea asíncrona en Celery fijando el task_id
+        task_escanear_documento.apply_async(
+            kwargs={
+                "file_bytes_b64": file_bytes_b64,
+                "filename": file.filename,
+                "email": email
+            },
+            task_id=task_id
         )
 
-        # 4. Retornar inmediatamente el ID de la tarea al frontend
+        # 6. Retornar respuesta al frontend
         return {
             "status": "pending",
-            "task_id": task.id,
+            "task_id": task_id,
             "message": "Escaneo de documento en proceso."
         }
 
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error iniciando el escaneo: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error iniciando el escaneo: {str(e)}"
+        )
         
 import io
 import re
@@ -1209,30 +1289,49 @@ os.makedirs("temp_outputs", exist_ok=True)
 # ---------------------------------------------------------
 @app.get("/estado-tarea/{task_id}")
 async def obtener_estado_tarea(task_id: str):
-    res = AsyncResult(task_id, app=celery_app)
-    
-    if res.state == "PENDING":
-        return {
-            "status": "PROCESSING",
-            "info": {"status": "En cola de espera..."}
-        }
-    elif res.state == "PROCESSING":
-        return {
-            "status": "PROCESSING",
-            "info": res.info  # Devuelve la meta enviada desde update_state
-        }
-    elif res.state == "SUCCESS":
-        return {
-            "status": "COMPLETED",
-            "result": res.result  # Devuelve el diccionario final retornado por la tarea
-        }
-    elif res.state == "FAILURE":
-        return {
-            "status": "FAILED",
-            "error": str(res.result)
-        }
-    
-    return {"status": res.state, "info": str(res.info)}
+    try:
+        res = AsyncResult(task_id, app=celery_app)
+
+        if res.state == "PENDING":
+            return {
+                "status": "PROCESSING",
+                "info": {"status": "En cola de espera..."}
+            }
+
+        elif res.state == "PROGRESS" or res.state == "PROCESSING":
+            return {
+                "status": "PROCESSING",
+                "info": res.info if isinstance(res.info, dict) else {"status": str(res.info)}
+            }
+
+        elif res.state == "SUCCESS":
+            return {
+                "status": "COMPLETED",
+                "result": res.result
+            }
+
+        elif res.state == "FAILURE":
+            return {
+                "status": "FAILED",
+                "error": str(res.result)
+            }
+
+        # Fallback a MongoDB si Celery ya no tiene la tarea en memoria
+        doc = actas_collection.find_one({"celery_task_id": task_id}) or scanners_historial_collection.find_one({"celery_task_id": task_id})
+        if doc:
+            doc.pop("_id", None)
+            return {
+                "status": doc.get("estado", res.state),
+                "result": doc
+            }
+
+        return {"status": res.state, "info": str(res.info)}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error consultando el estado de la tarea: {str(e)}"
+        )
 
 @app.get("/api/scanners/historial")
 async def obtener_historial_scanners(email: str):
