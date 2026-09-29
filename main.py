@@ -428,15 +428,7 @@ def get_user_status(email: str):
     }
 
 
-@app.get("/api/actas/historial")
-def obtener_historial_actas(email: str):
-  actas_cursor = actas_collection.find({"email": email})
-  actas = []
-  for doc in actas_cursor:
-    doc["id"] = str(doc["_id"])
-    del doc["_id"]
-    actas.append(doc)
-  return {"actas": actas}
+
 
 
 @app.put("/api/actas/renombrar")
@@ -2129,26 +2121,34 @@ def programar_cancelacion_suscripcion(data: ProgramarCancelacionRequest):
         raise HTTPException(status_code=500, detail=f"Error al programar la cancelación: {str(error)}")
 
 
-# --- ENDPOINT 4: Listar Cuentas Free ---
-@router.get("/api/admin/cuentas-free")
-def listar_cuentas_free(db=None):
+from urllib.parse import unquote
+from fastapi import HTTPException
+
+# --- ROOT ENDPOINT ---
+@app.get("/")
+def read_root():
+    return {
+        "status": "online",
+        "message": "ActaBot PH API funcionando correctamente"
+    }
+
+# --- ENDPOINT: Listar Cuentas Free (Único y Definitivo) ---
+@app.get("/api/admin/cuentas-free")
+def listar_cuentas_free_endpoint():
     try:
-        # Si usas PyMongo / Motor:
-        # free_users = list(db.usuarios.find({"plan": "free"}))
-        free_users = [] # Reemplaza con tu consulta real a la base de datos
+        # Consulta real a tu colección de usuarios con plan 'free', excluyendo contraseñas si aplica
+        free_users = list(users_collection.find({"plan": "free"}, {"_id": 0, "password": 0}))
         
         return {
             "success": True,
             "total": len(free_users),
             "cuentas": free_users
         }
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Error al listar cuentas free: {str(error)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al listar cuentas free: {str(e)}")
 
 
-from urllib.parse import unquote
-from fastapi import HTTPException
-
+# --- ENDPOINT: Eliminar Cuenta Free por Identificador ---
 @app.delete("/api/admin/cuentas-free/{identifier}")
 def eliminar_cuenta_free_endpoint(identifier: str):
     try:
@@ -2163,7 +2163,7 @@ def eliminar_cuenta_free_endpoint(identifier: str):
             "plan": "free"
         }
         
-        # Asegúrate de que 'users_collection' sea tu variable de la base de datos MongoDB
+        # Ejecuta la eliminación en MongoDB
         resultado = users_collection.find_one_and_delete(query)
 
         if not resultado:
@@ -2177,26 +2177,6 @@ def eliminar_cuenta_free_endpoint(identifier: str):
         raise he
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Error al eliminar la cuenta free: {str(error)}")
-        
-@app.get("/")
-def read_root():
-    return {
-        "status": "online",
-        "message": "ActaBot PH API funcionando correctamente"
-    }
-
-@app.get("/api/admin/cuentas-free")
-def listar_cuentas_free_endpoint():
-    try:
-        # Consulta real a tu colección de usuarios con plan 'free'
-        free_users = list(users_collection.find({"plan": "free"}, {"_id": 0, "password": 0}))
-        return {
-            "success": True,
-            "total": len(free_users),
-            "cuentas": free_users
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/admin/licencias")
 def listar_licencias_endpoint():
