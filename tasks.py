@@ -70,8 +70,8 @@ ORDEN DEL DÍA
 DESARROLLO DE LA ASAMBLEA
 PUNTO PRIMERO: [TÍTULO DEL PUNTO]
 [Narrativa detallada y circunstanciada del debate, montos, cifras, saldos, nombres de quienes intervinieron y explicaciones dadas, sin omitir información clave].
-DECISIONES: [Detalle preciso de lo aprobado, votado o resuelto].
-PENDIENTES: [Tareas, responsables or acciones abiertas, o "Ninguno"].
+DECISIONES: [Detalle preciso de lo approved, votado o resuelto].
+PENDIENTES: [Tareas, responsables o acciones abiertas, o "Ninguno"].
 
 (Repetir la misma estructura de DECISIONES y PENDIENTES para cada uno de los puntos del orden del día).
 
@@ -159,7 +159,7 @@ REGLAS ESTRICTAS DE REDACCIÓN:
 
 PROMPT_SISTEMA_LEGAL = """
 Eres un Abogado Litigante y Asesor Jurídico Senior experto en derecho procesal y redacción de dictámenes y audiencias.
-Tu objetivo es redactar un dictamen, acta de audiencia o concepto legal formal, íntegro y riguroso a partir de la transcripción provista (con diarización de voces), siguiendo estrictamente la estructura jurídica oficial.
+Tu objetivo es redactar un dictamen, acta de audiencia o concepto legal formal, íntegro y riguroso a partir de la transcripción provista (con diarización de voces), siguiendo strictly la estructura jurídica oficial.
 
 ESTRUCTURA OBLIGATORIA QUE DEBES GENERAR (SIN MODIFICAR EL ORDEN):
 
@@ -249,7 +249,7 @@ Tu objetivo es redactar un acta de consejo académico o reunión pedagógica for
 
 ESTRUCTURA OBLIGATORIA QUE DEBES GENERAR (SIN MODIFICAR EL ORDEN):
 
-ACTA DE CONSEJO ACÉDEMICO Y REUNIÓN EDUCATIVA
+ACTA DE CONSEJO ACADÉMICO Y REUNIÓN EDUCATIVA
 CONSEJO ACADÉMICO DE LA INSTITUCIÓN [Nombre del Colegio o Universidad extraído del audio]
 En la ciudad de [Ciudad], a [Fecha], siendo las [Hora], se reúnen los miembros del Consejo Académico... [Introducción formal de la reunión institucional].
 
@@ -331,18 +331,15 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
                 
         file_hash = sha256_hash.hexdigest()
 
-        # PROTECCIÓN DE IDEMPOTENCIA POR TASK_ID (Evita duplicados si Celery reintenta por error de red al finalizar)
-        if email:
-            acta_reintentada = actas_collection.find_one({
-                "celery_task_id": celery_task_id
-            })
-            if acta_reintentada:
-                return {
-                    "status": "COMPLETED",
-                    "acta_id": str(acta_reintentada["_id"]),
-                    "nombre_acta": acta_reintentada["nombre_acta"],
-                    "file_url": acta_reintentada["file_url"]
-                }
+        # PROTECCIÓN DE IDEMPOTENCIA: Verificar si la tarea ya fue completada exitosamente
+        acta_existente = actas_collection.find_one({"celery_task_id": celery_task_id})
+        if acta_existente and acta_existente.get("estado") == "COMPLETED":
+            return {
+                "status": "COMPLETED",
+                "acta_id": str(acta_existente["_id"]),
+                "nombre_acta": acta_existente["nombre_acta"],
+                "file_url": acta_existente["file_url"]
+            }
 
         cached = transripciones_collection.find_one({"file_hash": file_hash})
         duracion_segundos = 0
@@ -462,29 +459,40 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
                 }
             )
 
-        # Guardar historial de acta con su celery_task_id de protección
-        data_acta = {
-            "email": email,
-            "celery_task_id": celery_task_id,
+        # ACTUALIZACIÓN DEL REGISTRO PRE-CREADO EN MONGODB (NO USAR insert_one AQUÍ)
+        update_data = {
+            "estado": "COMPLETED",
             "file_hash": file_hash,
             "nombre_acta": nombre_archivo_acta,
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "peso": peso_archivo,
             "contenido": acta_final,
             "duracion_horas": duracion_horas,
             "file_url": docx_url,
-            "motor": motor
+            "motor": motor,
+            "updatedAt": datetime.now(timezone.utc)
         }
-        inserted = actas_collection.insert_one(data_acta)
+        
+        actas_collection.update_one(
+            {"celery_task_id": celery_task_id},
+            {"$set": update_data}
+        )
+
+        doc_actualizado = actas_collection.find_one({"celery_task_id": celery_task_id})
+        acta_db_id = str(doc_actualizado["_id"]) if doc_actualizado else None
 
         return {
             "status": "COMPLETED",
-            "acta_id": str(inserted.inserted_id),
+            "acta_id": acta_db_id,
             "nombre_acta": nombre_archivo_acta,
             "file_url": docx_url
         }
 
     except Exception as exc:
+        # Marcar estado como FAILED en MongoDB si ocurre un error inesperado
+        actas_collection.update_one(
+            {"celery_task_id": self.request.id},
+            {"$set": {"estado": "FAILED", "error": str(exc)}}
+        )
         raise Exception(f"Fallo en la tarea de procesamiento: {str(exc)}")
 
 
@@ -502,21 +510,14 @@ def task_escanear_documento(self, file_bytes_b64: str, filename: str, email: str
         celery_task_id = self.request.id
         self.update_state(state="PROCESSING", meta={"status": "Validando permisos y leyendo archivo..."})
 
-        # =========================================================================
-        # PROTECCIÓN DE IDEMPOTENCIA POR TASK_ID:
-        # Si esta tarea específica ya había terminado de procesarse y guardarse, 
-        # pero falló al retornar la respuesta al broker, evitamos duplicar tokens y registros.
-        # =========================================================================
-        if email:
-            scanner_reintentado = scanners_historial_collection.find_one({
-                "celery_task_id": celery_task_id
-            })
-            if scanner_reintentado:
-                return {
-                    "status": "COMPLETED",
-                    "transcripcion": scanner_reintentado["contenido"],
-                    "id": str(scanner_reintentado["_id"])
-                }
+        # PROTECCIÓN DE IDEMPOTENCIA: Verificar si la tarea ya fue completada
+        scanner_existente = scanners_historial_collection.find_one({"celery_task_id": celery_task_id})
+        if scanner_existente and scanner_existente.get("estado") == "COMPLETED":
+            return {
+                "status": "COMPLETED",
+                "transcripcion": scanner_existente["contenido"],
+                "id": str(scanner_existente["_id"])
+            }
 
         # Validar límite de tokens del usuario
         if email:
@@ -631,19 +632,23 @@ STRICT RULES:
             resultado_html = resultado_html[:-3]
         resultado_html = resultado_html.strip()
 
-        # Guardar registro en historial de scanners incluyendo el celery_task_id
+        # ACTUALIZACIÓN DEL REGISTRO PRE-CREADO EN HISTORIAL DE SCANNERS (NO USAR insert_one AQUÍ)
         scanner_id = None
         if email:
-            nuevo_registro = {
-                "email": email,
-                "celery_task_id": celery_task_id,
-                "nombre": filename or "Documento Escaneado",
-                "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "tokens": tokens_consumidos,
-                "contenido": resultado_html
-            }
-            resultado_db = scanners_historial_collection.insert_one(nuevo_registro)
-            scanner_id = str(resultado_db.inserted_id)
+            scanners_historial_collection.update_one(
+                {"celery_task_id": celery_task_id},
+                {
+                    "$set": {
+                        "estado": "COMPLETED",
+                        "tokens": tokens_consumidos,
+                        "contenido": resultado_html,
+                        "updatedAt": datetime.now(timezone.utc)
+                    }
+                }
+            )
+            scanner_doc = scanners_historial_collection.find_one({"celery_task_id": celery_task_id})
+            if scanner_doc:
+                scanner_id = str(scanner_doc["_id"])
 
         return {
             "status": "COMPLETED",
@@ -652,4 +657,10 @@ STRICT RULES:
         }
 
     except Exception as e:
-        raise Exception(f"Error procesando el archivo en Celery: {str(e)}")
+        # Marcar estado como FAILED en MongoDB si ocurre un error inesperado
+        if email:
+            scanners_historial_collection.update_one(
+                {"celery_task_id": self.request.id},
+                {"$set": {"estado": "FAILED", "error": str(e)}}
+            )
+        raise Exception(f"Error procesando el archivo: {str(e)}")
