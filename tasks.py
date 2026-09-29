@@ -317,13 +317,18 @@ def task_procesar_asamblea(self, temp_audio_path: str, email: str, instrucciones
     try:
         self.update_state(state="PROCESSING", meta={"status": "Procesando audio e identificando oradores desde la nube..."})
 
-        # Descarga temporal para hashing / caché
-        response_audio = requests.get(temp_audio_path, timeout=60)
+        # Descarga con stream=True para calcular el hash por bloques sin saturar la RAM
+        response_audio = requests.get(temp_audio_path, stream=True, timeout=60)
         if response_audio.status_code != 200:
             raise Exception(f"No se pudo descargar el archivo de audio desde la nube: {temp_audio_path}")
             
-        content_bytes = response_audio.content
-        file_hash = hashlib.sha256(content_bytes).hexdigest()
+        # Cálculo eficiente del hash SHA-256 mediante streaming (Bloques de 8KB)
+        sha256_hash = hashlib.sha256()
+        for chunk in response_audio.iter_content(chunk_size=8192):
+            if chunk:
+                sha256_hash.update(chunk)
+                
+        file_hash = sha256_hash.hexdigest()
         cached = transripciones_collection.find_one({"file_hash": file_hash})
 
         duracion_segundos = 0
