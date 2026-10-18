@@ -428,8 +428,47 @@ def get_user_status(email: str):
     }
 
 
+# ==========================================
+# ENDPOINT: VERIFICAR LICENCIA Y LÍMITES
+# ==========================================
+@app.get("/api/verificar-licencia")
+def verificar_licencia(email: str):
+    """
+    Retorna el plan actual del usuario y su límite de generación en minutos 
+    consultando directamente la base de datos de MongoDB.
+    """
+    usuario = users_collection.find_one({"email": email.strip().lower()})
+    
+    if not usuario:
+        # Si no se encuentra, se asume plan free por defecto
+        return {
+            "plan": "free",
+            "limite_generacion_minutos": CONFIGURACION_PLANES["free"]["horas"] * 60 # 180 min o lo configurado
+        }
+    
+    plan_usuario = usuario.get("plan", "free").lower()
+    
+    # Obtener el límite de horas del diccionario de configuración (ej: corporativo = 200 horas * 60 = 12000 min, o según tu regla)
+    # Nota: Asegúrate de alinear estos valores con los límites reales por archivo/mes que prefieras.
+    config_plan = CONFIGURACION_PLANES.get(plan_usuario, CONFIGURACION_PLANES["free"])
+    
+    # Si guardas un límite personalizado por archivo o usas el límite del plan:
+    # Para el plan corporativo (ej. 600 minutos por archivo según tu alerta anterior):
+    limites_por_archivo_minutos = {
+        "free": 15,
+        "basico": 180,
+        "profesional": 300,
+        "corporativo": 600
+    }
+    
+    limite_minutos = limites_por_archivo_minutos.get(plan_usuario, 15)
 
-
+    return {
+        "email": usuario.get("email"),
+        "plan": plan_usuario,
+        "limite_generacion_minutos": limite_minutos,
+        "horas_restantes": usuario.get("horas_restantes", 0.0)
+    }
 
 @app.put("/api/actas/renombrar")
 async def renombrar_acta(data: RenombrarActaRequest):
